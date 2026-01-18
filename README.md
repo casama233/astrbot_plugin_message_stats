@@ -92,7 +92,7 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 - `blocked_groups`: 屏蔽群聊列表（不统计发言且无法使用指令）
 
 ### 配置方式
-1. 通过插件配置 (推荐)
+1. 通过插件配置（推荐）
 2. 通过命令配置
 3. 编辑配置文件：`data/config.json`
 
