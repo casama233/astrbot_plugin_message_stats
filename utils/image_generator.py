@@ -113,8 +113,9 @@ class ImageGenerator:
         self.timeout = BROWSER_TIMEOUT
         self.viewport_height = VIEWPORT_HEIGHT
         
-        # 模板路径
-        self.template_path = Path(__file__).parent.parent / "templates" / "rank_template.html"
+        # 模板路径 - 根据主题选择
+        self._templates_dir = Path(__file__).parent.parent / "templates"
+        self._update_template_path()
         
         # 模板缓存机制
         self._template_cache: Dict[str, Any] = {}
@@ -124,6 +125,18 @@ class ImageGenerator:
         
         # Jinja2环境将在initialize方法中初始化
         self.jinja_env = None
+    
+    def _update_template_path(self):
+        """根据主题配置更新模板路径"""
+        theme = getattr(self.config, 'theme', 'default')
+        template_map = {
+            'default': 'rank_template.html',
+            'liquid_glass': 'rank_template_liquid_glass.html',
+            'liquid_glass_dark': 'rank_template_liquid_glass_dark.html',
+        }
+        template_file = template_map.get(theme, 'rank_template.html')
+        self.template_path = self._templates_dir / template_file
+        self.logger.info(f"使用排行榜主题: {theme}, 模板: {template_file}")
     
 
     

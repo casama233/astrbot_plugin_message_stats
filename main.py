@@ -340,7 +340,7 @@ class MessageStatsPlugin(Star):
             self.logger.warning(f"图片生成器初始化失败: {e}")
         
         # 记录当前配置状态
-        self.logger.info(f"当前配置: 图片模式={self.plugin_config.if_send_pic}, 显示人数={self.plugin_config.rand}")
+        self.logger.info(f"当前配置: 主题={self.plugin_config.theme}, 图片模式={self.plugin_config.if_send_pic}, 显示人数={self.plugin_config.rand}")
     
     async def _initialize_timer_manager(self):
         """初始化定时任务管理器

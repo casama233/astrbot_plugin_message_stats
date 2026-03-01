@@ -368,6 +368,7 @@ class PluginConfig:
     支持数据序列化和反序列化，便于配置文件的读写。
     
     Attributes:
+        theme (str): 排行榜主题风格，支持 'default'（经典浅色）和 'liquid_glass'（液态玻璃）
         is_admin_restricted (int): 是否限制管理员操作，0为不限制，1为限制
         rand (int): 排行榜显示人数，默认为20人
         if_send_pic (int): 是否发送图片，0为文字模式，1为图片模式（与Web Schema一致）
@@ -387,6 +388,7 @@ class PluginConfig:
         >>> config.detailed_logging_enabled = False  # 隐藏详细日志
     """
     def __init__(self):
+        self.theme = "default"  # 排行榜主题风格: default, liquid_glass
         self.is_admin_restricted = 0
         self.rand = 20
         self.if_send_pic = 1
@@ -427,6 +429,7 @@ class PluginConfig:
             20
         """
         return {
+            "theme": self.theme,
             "is_admin_restricted": self.is_admin_restricted,
             "rand": self.rand,
             "if_send_pic": self.if_send_pic,
@@ -470,9 +473,15 @@ class PluginConfig:
         config = cls()
         
         # 支持字段名映射 - if_send_pic是标准字段，send_pic是兼容字段
-        if_send_pic = data.get("if_send_pic", data.get("send_pic", 1))
+        if_send_pic_raw = data.get("if_send_pic", data.get("send_pic", "图片"))
+        # 兼容新旧配置：字符串 "图片"/"文字" 或 int 1/0
+        if isinstance(if_send_pic_raw, str):
+            if_send_pic = 0 if if_send_pic_raw == "文字" else 1
+        else:
+            if_send_pic = int(if_send_pic_raw)
         
         # 设置配置值
+        config.theme = data.get("theme", "default")
         config.is_admin_restricted = data.get("is_admin_restricted", 0)
         config.rand = data.get("rand", 20)
         config.if_send_pic = if_send_pic
