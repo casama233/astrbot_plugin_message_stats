@@ -166,6 +166,7 @@ astrbot_plugin_message_stats/
 **xiaoruange39**
 - GitHub: [@xiaoruange39](https://github.com/xiaoruange39)
 - 插件开发：AstrBot生态贡献者
+- QQ群：[QQ群](https://qm.qq.com/q/8kdJ2Bzf6S)
 
 ## 🙏 致谢
 
