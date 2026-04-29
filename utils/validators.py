@@ -78,7 +78,8 @@ class Validators:
     def validate_group_id(group_id: Any) -> str:
         """验证群组ID格式
         
-        验证群组ID是否符合规范，必须是5-12位数字。
+        验证群组ID是否符合规范，支持正数ID（QQ等平台）和负号ID（Telegram等平台）。
+        数字部分长度需在5-15位之间。
         
         Args:
             group_id (Any): 要验证的群组ID，可以是任何类型
@@ -92,22 +93,28 @@ class Validators:
         Example:
             >>> Validators.validate_group_id("123456789")
             '123456789'
-            >>> Validators.validate_group_id(123456789)
-            '123456789'
+            >>> Validators.validate_group_id("-1001234567890")
+            '-1001234567890'
             >>> Validators.validate_group_id("")  # 抛出异常
         """
         if not group_id:
             raise ValidationError("群组ID不能为空")
         
-        group_id_str = str(group_id)
+        group_id_str = str(group_id).strip()
         
-        # 检查是否为数字
-        if not group_id_str.isdigit():
-            raise ValidationError("群组ID必须是数字")
+        # 处理前导负号（Telegram 群组ID为负数）
+        if group_id_str.startswith('-'):
+            numeric_part = group_id_str[1:]
+            if not numeric_part.isdigit():
+                raise ValidationError("群组ID必须是数字")
+        else:
+            numeric_part = group_id_str
+            if not numeric_part.isdigit():
+                raise ValidationError("群组ID必须是数字")
         
-        # 检查长度
-        if len(group_id_str) < GROUP_ID_MIN_LENGTH or len(group_id_str) > GROUP_ID_MAX_LENGTH:
-            raise ValidationError(f"群组ID长度应在{GROUP_ID_MIN_LENGTH}-{GROUP_ID_MAX_LENGTH}位之间")
+        # 对数字部分做长度检查，上限放宽至15以兼容Telegram超级群长ID
+        if len(numeric_part) < GROUP_ID_MIN_LENGTH or len(numeric_part) > 15:
+            raise ValidationError(f"群组ID数字部分长度应在{GROUP_ID_MIN_LENGTH}-15位之间")
         
         return group_id_str
     
@@ -927,4 +934,3 @@ class Validators:
             raise ValidationError(f"长度不能超过 {max_len} 个字符")
         
         return str_value
-
