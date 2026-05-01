@@ -231,11 +231,25 @@ class TimerManager:
                 self.logger.error("定时配置验证失败")
                 return False
             
-            # 检查unified_msg_origin可用性
+            # 检查unified_msg_origin可用性（支持正数/负数ID匹配）
             missing_origins = []
             for group_id in config.timer_target_groups:
-                if str(group_id) not in self.push_service.group_unified_msg_origins:
-                    missing_origins.append(str(group_id))
+                group_id_str = str(group_id)
+                # 直接匹配
+                if group_id_str in self.push_service.group_unified_msg_origins:
+                    continue
+                # 尝试从 unified_msg_origin 的值中匹配（提取最后一个:后的部分）
+                found = False
+                for origin_key, origin_value in self.push_service.group_unified_msg_origins.items():
+                    try:
+                        extracted_id = origin_value.rsplit(':', 1)[-1]
+                        if extracted_id == group_id_str:
+                            found = True
+                            break
+                    except (AttributeError, IndexError, ValueError):
+                        continue
+                if not found:
+                    missing_origins.append(group_id_str)
             
             if missing_origins:
                 self.logger.warning(f"⚠️ 以下群组缺少unified_msg_origin: {', '.join(missing_origins)}")

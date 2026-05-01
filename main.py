@@ -161,6 +161,9 @@ class MessageStatsPlugin(Star):
     async def _collect_group_unified_msg_origin(self, event: AstrMessageEvent):
         """收集群组的unified_msg_origin和群组名称
         
+        自动从 unified_msg_origin 中提取群组ID，同时以原始ID和提取的ID作为键存储，
+        确保不同平台（QQ正数ID、Telegram负数ID）都能正确匹配。
+        
         Args:
             event: 消息事件对象
         """
@@ -175,6 +178,15 @@ class MessageStatsPlugin(Star):
                 old_origin = self.group_unified_msg_origins.get(group_id_str)
                 self.group_unified_msg_origins[group_id_str] = unified_msg_origin
                 
+                # 从 unified_msg_origin 中提取群组ID（格式如 "Amydd:GroupMessage:-1003715592711"）
+                # 提取最后一个 ":" 之后的部分作为备用键
+                try:
+                    extracted_id = unified_msg_origin.rsplit(':', 1)[-1]
+                    if extracted_id and extracted_id != group_id_str:
+                        self.group_unified_msg_origins[extracted_id] = unified_msg_origin
+                except (AttributeError, IndexError, ValueError):
+                    pass
+                
                 if old_origin != unified_msg_origin:
                     self.logger.info(f"已收集群组 {group_id} 的 unified_msg_origin")
                     
@@ -187,7 +199,14 @@ class MessageStatsPlugin(Star):
                         origin_preview = unified_msg_origin[:20] + "..." if len(unified_msg_origin) > 20 else unified_msg_origin
                         self.logger.info(f"群组 {group_id} 的 unified_msg_origin: {origin_preview}")
                         
-                        if self.plugin_config.timer_enabled and group_id_str in self.plugin_config.timer_target_groups:
+                        # 检查目标群组是否匹配（支持正数/负数ID匹配）
+                        is_target_group = False
+                        for target_id in self.plugin_config.timer_target_groups:
+                            if group_id_str == target_id or extracted_id == target_id:
+                                is_target_group = True
+                                break
+                        
+                        if self.plugin_config.timer_enabled and is_target_group:
                             self.logger.info(f"检测到目标群组 {group_id} 的 unified_msg_origin 已更新，更新定时任务配置...")
                             # 确保unified_msg_origin映射表是最新的
                             self.timer_manager.push_service.group_unified_msg_origins = self.group_unified_msg_origins
