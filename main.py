@@ -850,10 +850,10 @@ class MessageStatsPlugin(Star):
                     # 获取群成员最新信息
                     members_info = await self._fetch_group_members_from_api(event, group_id)
                     if members_info:
-                        # 构建用户ID到最新昵称的映射
+                        # 构建用户ID到最新昵称的映射（使用 PlatformHelper 跨平台通用方式获取用户ID）
                         member_nickname_map = {}
                         for member in members_info:
-                            user_id = str(member.get("user_id", ""))
+                            user_id = PlatformHelper.get_user_id_from_member(member)
                             if user_id:
                                 # 使用群的昵称获取逻辑
                                 display_name = self._get_display_name_from_member(member)
@@ -1045,9 +1045,13 @@ class MessageStatsPlugin(Star):
         try:
             members_info = await self._fetch_group_members_from_api(event, group_id)
             if members_info:
-                # 重建字典缓存
+                # 重建字典缓存（使用 PlatformHelper 跨平台通用方式获取用户ID）
                 dict_cache_key = f"group_members_dict_{group_id}"
-                members_dict = {str(m.get("user_id", "")): m for m in members_info if m.get("user_id")}
+                members_dict = {}
+                for m in members_info:
+                    uid = PlatformHelper.get_user_id_from_member(m)
+                    if uid:
+                        members_dict[uid] = m
                 self.group_members_dict_cache[dict_cache_key] = members_dict
                 
                 # 查找用户
@@ -1331,9 +1335,13 @@ class MessageStatsPlugin(Star):
             if not members_info:
                 return
             
-            # 重建群成员字典缓存
+            # 重建群成员字典缓存（使用 PlatformHelper 跨平台通用方式获取用户ID）
             dict_cache_key = f"group_members_dict_{group_id}"
-            members_dict = {str(m.get("user_id", "")): m for m in members_info if m.get("user_id")}
+            members_dict = {}
+            for m in members_info:
+                uid = PlatformHelper.get_user_id_from_member(m)
+                if uid:
+                    members_dict[uid] = m
             self.group_members_dict_cache[dict_cache_key] = members_dict
             
             # 更新用户数据中的昵称
