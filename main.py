@@ -203,10 +203,13 @@ class MessageStatsPlugin(Star):
                         origin_preview = unified_msg_origin[:20] + "..." if len(unified_msg_origin) > 20 else unified_msg_origin
                         self.logger.info(f"群组 {group_id} 的 unified_msg_origin: {origin_preview}")
                         
-                        # 检查目标群组是否匹配（支持正数/负数ID匹配）
+                        # 检查目标群组是否匹配（支持多种格式）
+                        # timer_target_groups 可能存储的是：
+                        #   1. 群组ID（如 -1003715592711 或 1081839722）
+                        #   2. unified_msg_origin 字符串（如 Amy:GroupMessage:1081839722）
                         is_target_group = False
                         for target_id in self.plugin_config.timer_target_groups:
-                            if group_id_str == target_id or extracted_id == target_id:
+                            if group_id_str == target_id or extracted_id == target_id or unified_msg_origin == target_id:
                                 is_target_group = True
                                 break
                         
