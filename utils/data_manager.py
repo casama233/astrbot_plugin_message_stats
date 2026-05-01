@@ -151,6 +151,25 @@ class DataManager:
         await self.save_config(default_config)
         self.logger.info("已创建默认配置文件")
     
+    @staticmethod
+    def _is_valid_group_id(group_id: str) -> bool:
+        """验证群组ID是否为有效的数字格式（支持负数，如Telegram的群组ID）
+        
+        Args:
+            group_id (str): 群组ID字符串
+            
+        Returns:
+            bool: 是否为有效的数字格式
+        """
+        if not group_id:
+            return False
+        group_id_str = str(group_id).strip()
+        # 处理前导负号（Telegram 群组ID为负数）
+        if group_id_str.startswith('-'):
+            numeric_part = group_id_str[1:]
+            return numeric_part.isdigit() and len(numeric_part) >= 1
+        return group_id_str.isdigit() and len(group_id_str) >= 1
+
     def _validate_json_content(self, content: str) -> bool:
         """验证JSON内容格式
         
@@ -253,7 +272,7 @@ class DataManager:
         从缓存或文件读取指定群组的用户数据。
         
         Args:
-            group_id (str): 群组ID，必须是有效的数字字符串
+            group_id (str): 群组ID，必须是有效的数字字符串（支持负数，如Telegram群组ID）
             
         Returns:
             List[UserData]: 用户数据列表，如果读取失败则返回空列表
@@ -261,7 +280,7 @@ class DataManager:
         Raises:
             ValueError: 当group_id格式不正确时
         """
-        if not group_id.isdigit():
+        if not self._is_valid_group_id(group_id):
             raise ValueError(f"群组ID必须是数字字符串，当前值: {group_id}")
         
         cache_key = f"group_data_{group_id}"
@@ -284,7 +303,7 @@ class DataManager:
         异步保存指定群组的用户数据到JSON文件，并清除相关缓存。
         
         Args:
-            group_id (str): 群组ID，必须是有效的数字字符串
+            group_id (str): 群组ID，必须是有效的数字字符串（支持负数，如Telegram群组ID）
             users (List[UserData]): 用户数据列表，将被序列化为JSON格式保存
             
         Returns:
@@ -293,7 +312,7 @@ class DataManager:
         Raises:
             ValueError: 当group_id格式不正确时
         """
-        if not group_id.isdigit():
+        if not self._is_valid_group_id(group_id):
             raise ValueError(f"群组ID必须是数字字符串，当前值: {group_id}")
         
         # 使用GroupDataStore保存数据
@@ -319,8 +338,8 @@ class DataManager:
         使用基于群组ID的锁机制防止并发安全问题。
         
         Args:
-            group_id (str): 群组ID
-            user_id (str): 用户ID
+            group_id (str): 群组ID（支持负数，如Telegram群组ID）
+            user_id (str): 用户ID（支持负数，如Telegram用户ID）
             nickname (str): 用户昵称
             
         Returns:
@@ -329,10 +348,16 @@ class DataManager:
         Raises:
             ValueError: 当参数格式不正确时
         """
-        if not group_id.isdigit():
+        if not self._is_valid_group_id(group_id):
             raise ValueError(f"群组ID必须是数字字符串，当前值: {group_id}")
         
-        if not user_id.isdigit():
+        # 验证用户ID（支持负数，如Telegram用户ID）
+        user_id_str = str(user_id).strip()
+        if user_id_str.startswith('-'):
+            numeric_part = user_id_str[1:]
+            if not numeric_part.isdigit():
+                raise ValueError(f"用户ID必须是数字字符串，当前值: {user_id}")
+        elif not user_id_str.isdigit():
             raise ValueError(f"用户ID必须是数字字符串，当前值: {user_id}")
         
         # 获取群组级别的锁，确保同一群组的数据操作串行化

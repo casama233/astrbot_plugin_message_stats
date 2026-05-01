@@ -112,9 +112,9 @@ class Validators:
             if not numeric_part.isdigit():
                 raise ValidationError("群组ID必须是数字")
         
-        # 对数字部分做长度检查，上限放宽至15以兼容Telegram超级群长ID
-        if len(numeric_part) < GROUP_ID_MIN_LENGTH or len(numeric_part) > 15:
-            raise ValidationError(f"群组ID数字部分长度应在{GROUP_ID_MIN_LENGTH}-15位之间")
+        # 对数字部分做长度检查，上限放宽至20以兼容Discord长ID（19位）
+        if len(numeric_part) < GROUP_ID_MIN_LENGTH or len(numeric_part) > 20:
+            raise ValidationError(f"群组ID数字部分长度应在{GROUP_ID_MIN_LENGTH}-20位之间")
         
         return group_id_str
     
@@ -122,7 +122,8 @@ class Validators:
     def validate_user_id(user_id: Any) -> str:
         """验证用户ID格式
         
-        验证用户ID是否符合规范，必须是1-20位数字。
+        验证用户ID是否符合规范，支持正数ID（QQ等平台）和负号ID（Telegram等平台）。
+        数字部分长度需在1-20位之间。
         
         Args:
             user_id (Any): 要验证的用户ID，可以是任何类型
@@ -138,20 +139,28 @@ class Validators:
             '987654321'
             >>> Validators.validate_user_id(987654321)
             '987654321'
+            >>> Validators.validate_user_id("-1001234567890")
+            '-1001234567890'
             >>> Validators.validate_user_id("abc")  # 抛出异常
         """
         if not user_id:
             raise ValidationError("用户ID不能为空")
         
-        user_id_str = str(user_id)
+        user_id_str = str(user_id).strip()
         
-        # 检查是否为数字
-        if not user_id_str.isdigit():
-            raise ValidationError("用户ID必须是数字")
+        # 处理前导负号（Telegram 用户ID为负数）
+        if user_id_str.startswith('-'):
+            numeric_part = user_id_str[1:]
+            if not numeric_part.isdigit():
+                raise ValidationError("用户ID必须是数字")
+        else:
+            numeric_part = user_id_str
+            if not numeric_part.isdigit():
+                raise ValidationError("用户ID必须是数字")
         
         # 检查长度 - 放宽限制，支持各种长度的用户ID
-        if len(user_id_str) < USER_ID_MIN_LENGTH or len(user_id_str) > USER_ID_MAX_LENGTH:
-            raise ValidationError(f"用户ID长度应在{USER_ID_MIN_LENGTH}-{USER_ID_MAX_LENGTH}位之间")
+        if len(numeric_part) < USER_ID_MIN_LENGTH or len(numeric_part) > USER_ID_MAX_LENGTH:
+            raise ValidationError(f"用户ID数字部分长度应在{USER_ID_MIN_LENGTH}-{USER_ID_MAX_LENGTH}位之间")
         
         return user_id_str
     
