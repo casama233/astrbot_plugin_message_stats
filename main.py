@@ -202,7 +202,7 @@ class MessageStatsPlugin(Star):
         except (RuntimeError, OSError, IOError, ImportError, ValueError) as e:
             self.logger.error(f"收集群组unified_msg_origin失败(系统错误): {e}")
     async def _cache_group_name(self, event: AstrMessageEvent, group_id: str):
-        """获取并缓存群组名称
+        """获取并缓存群组名称（跨平台兼容）
         
         从事件或API获取群组名称，更新到 timer_manager 的缓存和数据文件中。
         
@@ -213,7 +213,7 @@ class MessageStatsPlugin(Star):
         try:
             group_name = None
             
-            # 方法1: 尝试通过 bot API 获取群组信息
+            # 方法1: 尝试通过 bot API 获取群组信息（QQ平台）
             if hasattr(event, 'bot') and event.bot:
                 try:
                     if hasattr(event.bot, 'api'):
@@ -226,6 +226,20 @@ class MessageStatsPlugin(Star):
                 except (AttributeError, TypeError, ValueError, asyncio.TimeoutError) as e:
                     self.logger.debug(f"通过API获取群名失败: {e}")
             
+            # 方法2: 尝试通过 context 获取（Telegram平台）
+            if not group_name and hasattr(self, 'context') and self.context:
+                try:
+                    client = self.context.bot
+                    if hasattr(client, 'api'):
+                        group_info = await client.api.call_action(
+                            'get_group_info', 
+                            group_id=int(group_id)
+                        )
+                        if group_info and isinstance(group_info, dict):
+                            group_name = group_info.get('group_name')
+                except (AttributeError, TypeError, ValueError, asyncio.TimeoutError) as e:
+                    self.logger.debug(f"通过context获取群名失败: {e}")
+            
             # 如果获取到群名，更新缓存
             if group_name:
                 self.logger.info(f"已获取群组 {group_id} 的名称: {group_name}")
@@ -233,10 +247,6 @@ class MessageStatsPlugin(Star):
                 # 更新到 timer_manager 的内存缓存
                 if self.timer_manager:
                     self.timer_manager.update_group_name_cache(group_id, group_name)
-                
-                # 更新到数据文件（下次保存时会自动包含）
-                # 这里我们可以单独保存群名，但为了简化，我们只更新内存缓存
-                # 群名会在下次保存群组数据时一并保存
                 
         except (AttributeError, KeyError, TypeError, RuntimeError) as e:
             self.logger.debug(f"缓存群组名称失败: {e}")
@@ -462,7 +472,7 @@ class MessageStatsPlugin(Star):
         """自动消息监听器 - 监听所有消息并记录群成员发言统计"""
         # 跳过命令消息
         message_str = getattr(event, 'message_str', '')
-        if message_str.startswith(('%', '/')):
+        if not message_str or message_str.startswith(('%', '/')):
             return
         
         # 获取基本信息
@@ -1184,12 +1194,30 @@ class MessageStatsPlugin(Star):
             return await self._fetch_group_members_from_api(event, group_id)
     
     async def _fetch_group_members_from_api(self, event: AstrMessageEvent, group_id: str) -> Optional[List[Dict[str, Any]]]:
-        """从API获取群成员"""
-        client = event.bot
+        """从API获取群成员（跨平台兼容）"""
+        # 尝试获取 API 客户端，兼容不同平台（QQ 平台使用 event.bot，Telegram 平台使用 self.context）
+        client = None
+        if hasattr(event, 'bot') and event.bot:
+            client = event.bot
+        elif hasattr(self, 'context') and self.context:
+            try:
+                client = self.context.bot
+            except (AttributeError, KeyError, TypeError):
+                pass
+        
+        if not client:
+            self.logger.debug(f"无法获取API客户端，跳过群成员列表获取（群 {group_id}）")
+            return None
+        
         params = {"group_id": group_id}
         
         try:
-            members_info = await client.api.call_action('get_group_member_list', **params)
+            if hasattr(client, 'api'):
+                members_info = await client.api.call_action('get_group_member_list', **params)
+            else:
+                self.logger.debug(f"API客户端没有api属性，跳过群成员列表获取（群 {group_id}）")
+                return None
+            
             if members_info:
                 # 缓存群成员列表,设置合理的过期时间
                 cache_key = f"group_members_{group_id}"
@@ -1226,16 +1254,26 @@ class MessageStatsPlugin(Star):
                        getattr(group_data, 'group_title', None) or \
                        f"群{group_id}"
             
-            # 如果事件对象获取失败，尝试通过API获取
+            # 如果事件对象获取失败，尝试通过API获取（跨平台兼容）
             try:
+                # 尝试从 event.bot 获取（QQ平台）
+                client = None
                 if hasattr(event, 'bot') and hasattr(event.bot, 'api'):
-                    group_info = await event.bot.api.call_action('get_group_info', group_id=group_id)
+                    client = event.bot
+                # 尝试从 self.context 获取（Telegram平台）
+                elif hasattr(self, 'context') and self.context:
+                    try:
+                        client = self.context.bot
+                    except (AttributeError, KeyError, TypeError):
+                        pass
+                
+                if client and hasattr(client, 'api'):
+                    group_info = await client.api.call_action('get_group_info', group_id=group_id)
                     if group_info and isinstance(group_info, dict):
                         group_name = group_info.get('group_name') or group_info.get('group_title') or group_info.get('name')
                         if group_name:
                             return str(group_name).strip()
             except (ConnectionError, asyncio.TimeoutError, ValueError, TypeError, AttributeError) as api_error:
-                # 修复：替换过于宽泛的Exception为具体异常类型
                 self.logger.warning(f"通过API获取群组 {group_id} 名称失败: {api_error}")
             
             return f"群{group_id}"
