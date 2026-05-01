@@ -359,8 +359,8 @@ class ImageGenerator:
             # 生成HTML内容
             html_content = await self._generate_html(users, group_info, title, current_user_id)
             
-            # 设置页面内容
-            await self.page.set_content(html_content, wait_until="networkidle")
+            # 设置页面内容（使用 load 而非 networkidle，避免外部资源加载超时）
+            await self.page.set_content(html_content, wait_until="load")
             
             # 等待页面加载完成
             await self.page.wait_for_timeout(2000)
