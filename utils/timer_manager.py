@@ -432,12 +432,20 @@ class TimerManager:
                 self.logger.warning(f"跳过无效的群组ID类型: {type(group_id)}")
                 continue
             
-            if not group_id.isdigit():
+            # 支持正数ID（QQ）和负数ID（Telegram）
+            group_id_str = str(group_id).strip()
+            if not group_id_str:
+                self.logger.warning(f"跳过空的群组ID")
+                continue
+            # 验证是否为有效的数字ID（支持负数）
+            if group_id_str.lstrip('-').isdigit():
+                pass  # 有效ID
+            else:
                 self.logger.warning(f"跳过无效的群组ID格式: {group_id}")
                 continue
             
             # 推送到指定群组
-            success = await self._push_to_group(group_id, config)
+            success = await self._push_to_group(group_id_str, config)
             if success:
                 success_count += 1
                 self.logger.info(f"✅ 群组 {group_id} 推送成功")
