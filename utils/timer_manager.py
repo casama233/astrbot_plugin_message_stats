@@ -231,14 +231,19 @@ class TimerManager:
                 self.logger.error("定时配置验证失败")
                 return False
             
-            # 检查unified_msg_origin可用性（支持正数/负数ID匹配）
+            # 检查unified_msg_origin可用性（支持多种匹配方式）
+            # timer_target_groups 可能存储的是：
+            #   1. 群组ID（如 -1003715592711 或 1081839722）
+            #   2. unified_msg_origin 字符串（如 Amy:GroupMessage:1081839722）
             missing_origins = []
             for group_id in config.timer_target_groups:
                 group_id_str = str(group_id)
-                # 直接匹配
+                
+                # 方式1: 直接匹配键名
                 if group_id_str in self.push_service.group_unified_msg_origins:
                     continue
-                # 尝试从 unified_msg_origin 的值中匹配（提取最后一个:后的部分）
+                
+                # 方式2: 匹配 unified_msg_origin 的值（提取最后一个:后的部分）
                 found = False
                 for origin_key, origin_value in self.push_service.group_unified_msg_origins.items():
                     try:
@@ -248,6 +253,27 @@ class TimerManager:
                             break
                     except (AttributeError, IndexError, ValueError):
                         continue
+                
+                # 方式3: 如果 group_id_str 本身是 unified_msg_origin 格式（如 Amy:GroupMessage:1081839722）
+                # 尝试提取其中的群组ID并匹配
+                if not found and ':' in group_id_str:
+                    try:
+                        extracted_from_target = group_id_str.rsplit(':', 1)[-1]
+                        if extracted_from_target in self.push_service.group_unified_msg_origins:
+                            found = True
+                        # 方式4: 用提取的ID去匹配 unified_msg_origin 的值
+                        if not found:
+                            for origin_key, origin_value in self.push_service.group_unified_msg_origins.items():
+                                try:
+                                    origin_extracted = origin_value.rsplit(':', 1)[-1]
+                                    if origin_extracted == extracted_from_target:
+                                        found = True
+                                        break
+                                except (AttributeError, IndexError, ValueError):
+                                    continue
+                    except (AttributeError, IndexError, ValueError):
+                        pass
+                
                 if not found:
                     missing_origins.append(group_id_str)
             
@@ -432,20 +458,32 @@ class TimerManager:
                 self.logger.warning(f"跳过无效的群组ID类型: {type(group_id)}")
                 continue
             
-            # 支持正数ID（QQ）和负数ID（Telegram）
             group_id_str = str(group_id).strip()
             if not group_id_str:
                 self.logger.warning(f"跳过空的群组ID")
                 continue
+            
+            # timer_target_groups 可能存储的是：
+            #   1. 群组ID（如 -1003715592711 或 1081839722）
+            #   2. unified_msg_origin 字符串（如 Amy:GroupMessage:1081839722）
+            # 如果是 unified_msg_origin 格式，尝试提取其中的群组ID
+            actual_group_id = group_id_str
+            if ':' in group_id_str:
+                try:
+                    extracted = group_id_str.rsplit(':', 1)[-1]
+                    if extracted.lstrip('-').isdigit():
+                        actual_group_id = extracted
+                        self.logger.debug(f"从 unified_msg_origin 中提取群组ID: {group_id_str} -> {actual_group_id}")
+                except (AttributeError, IndexError, ValueError):
+                    pass
+            
             # 验证是否为有效的数字ID（支持负数）
-            if group_id_str.lstrip('-').isdigit():
-                pass  # 有效ID
-            else:
+            if not actual_group_id.lstrip('-').isdigit():
                 self.logger.warning(f"跳过无效的群组ID格式: {group_id}")
                 continue
             
             # 推送到指定群组
-            success = await self._push_to_group(group_id_str, config)
+            success = await self._push_to_group(actual_group_id, config)
             if success:
                 success_count += 1
                 self.logger.info(f"✅ 群组 {group_id} 推送成功")
