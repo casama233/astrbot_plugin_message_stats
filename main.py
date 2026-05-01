@@ -187,6 +187,10 @@ class MessageStatsPlugin(Star):
                 except (AttributeError, IndexError, ValueError):
                     pass
                 
+                # 同时以 unified_msg_origin 本身作为键存储
+                # 这样无论 timer_target_groups 中填的是群号还是 unified_msg_origin 都能匹配
+                self.group_unified_msg_origins[unified_msg_origin] = unified_msg_origin
+                
                 if old_origin != unified_msg_origin:
                     self.logger.info(f"已收集群组 {group_id} 的 unified_msg_origin")
                     
