@@ -24,6 +24,7 @@ from astrbot.api import logger as astrbot_logger
 from .utils.data_manager import DataManager
 from .utils.image_generator import ImageGenerator, ImageGenerationError
 from .utils.validators import Validators
+from .utils.platform_helper import PlatformHelper
 
 from .utils.models import (
     UserData, PluginConfig, GroupInfo, MessageDate, 
@@ -202,43 +203,18 @@ class MessageStatsPlugin(Star):
         except (RuntimeError, OSError, IOError, ImportError, ValueError) as e:
             self.logger.error(f"收集群组unified_msg_origin失败(系统错误): {e}")
     async def _cache_group_name(self, event: AstrMessageEvent, group_id: str):
-        """获取并缓存群组名称（跨平台兼容）
+        """获取并缓存群组名称（跨平台通用）
         
-        从事件或API获取群组名称，更新到 timer_manager 的缓存和数据文件中。
+        使用 PlatformHelper 统一获取群组名称，支持所有平台。
         
         Args:
             event: 消息事件对象
             group_id: 群组ID
         """
         try:
-            group_name = None
-            
-            # 方法1: 尝试通过 bot API 获取群组信息（QQ平台）
-            if hasattr(event, 'bot') and event.bot:
-                try:
-                    if hasattr(event.bot, 'api'):
-                        group_info = await event.bot.api.call_action(
-                            'get_group_info', 
-                            group_id=int(group_id)
-                        )
-                        if group_info and isinstance(group_info, dict):
-                            group_name = group_info.get('group_name')
-                except (AttributeError, TypeError, ValueError, asyncio.TimeoutError) as e:
-                    self.logger.debug(f"通过API获取群名失败: {e}")
-            
-            # 方法2: 尝试通过 context 获取（Telegram平台）
-            if not group_name and hasattr(self, 'context') and self.context:
-                try:
-                    client = self.context.bot
-                    if hasattr(client, 'api'):
-                        group_info = await client.api.call_action(
-                            'get_group_info', 
-                            group_id=int(group_id)
-                        )
-                        if group_info and isinstance(group_info, dict):
-                            group_name = group_info.get('group_name')
-                except (AttributeError, TypeError, ValueError, asyncio.TimeoutError) as e:
-                    self.logger.debug(f"通过context获取群名失败: {e}")
+            # 使用 PlatformHelper 统一获取群组名称（跨平台通用）
+            helper = PlatformHelper(event, self.context)
+            group_name = await helper.get_group_name(group_id)
             
             # 如果获取到群名，更新缓存
             if group_name:
@@ -987,9 +963,9 @@ class MessageStatsPlugin(Star):
     
     @data_operation_handler('extract', '群成员昵称数据')
     def _get_display_name_from_member(self, member: Dict[str, Any]) -> Optional[str]:
-        """从群成员信息中提取显示昵称
+        """从群成员信息中提取显示昵称（跨平台通用）
         
-        提取用户昵称的辅助函数，避免重复的逻辑
+        使用 PlatformHelper 统一提取昵称，支持所有平台。
         
         Args:
             member (Dict[str, Any]): 群成员信息字典
@@ -997,7 +973,7 @@ class MessageStatsPlugin(Star):
         Returns:
             Optional[str]: 用户的显示昵称，如果获取失败则返回None
         """
-        return member.get("card") or member.get("nickname")
+        return PlatformHelper.get_display_name_from_member(member)
 
     async def _get_user_nickname_unified(self, event: AstrMessageEvent, group_id: str, user_id: str) -> str:
         """统一的用户昵称获取方法 - 性能优先版本（缓存优先策略）
@@ -1194,55 +1170,46 @@ class MessageStatsPlugin(Star):
             return await self._fetch_group_members_from_api(event, group_id)
     
     async def _fetch_group_members_from_api(self, event: AstrMessageEvent, group_id: str) -> Optional[List[Dict[str, Any]]]:
-        """从API获取群成员（跨平台兼容）"""
-        # 尝试获取 API 客户端，兼容不同平台（QQ 平台使用 event.bot，Telegram 平台使用 self.context）
-        client = None
-        if hasattr(event, 'bot') and event.bot:
-            client = event.bot
-        elif hasattr(self, 'context') and self.context:
-            try:
-                client = self.context.bot
-            except (AttributeError, KeyError, TypeError):
-                pass
+        """从API获取群成员（跨平台通用）
         
-        if not client:
-            self.logger.debug(f"无法获取API客户端，跳过群成员列表获取（群 {group_id}）")
-            return None
+        使用 PlatformHelper 统一获取群成员列表，支持所有平台。
         
-        params = {"group_id": group_id}
-        
-        try:
-            if hasattr(client, 'api'):
-                members_info = await client.api.call_action('get_group_member_list', **params)
-            else:
-                self.logger.debug(f"API客户端没有api属性，跳过群成员列表获取（群 {group_id}）")
-                return None
+        Args:
+            event: 消息事件对象
+            group_id: 群组ID
             
-            if members_info:
-                # 缓存群成员列表,设置合理的过期时间
-                cache_key = f"group_members_{group_id}"
-                self.group_members_cache[cache_key] = members_info
-                
-                # 对于大群(成员数>500),记录警告
-                if len(members_info) > 500:
-                    self.logger.warning(f"群 {group_id} 成员数较多({len(members_info)}),建议调整缓存策略")
-                
-                return members_info
-        except (AttributeError, KeyError, TypeError) as e:
-            self.logger.warning(f"获取群成员列表失败(数据格式错误): {e}")
-        except (ConnectionError, TimeoutError, OSError) as e:
-            self.logger.warning(f"获取群成员列表失败(网络错误): {e}")
-        except ImportError as e:
-            self.logger.warning(f"获取群成员列表失败(导入错误): {e}")
-        except RuntimeError as e:
-            self.logger.warning(f"获取群成员列表失败(运行时错误): {e}")
-        except ValueError as e:
-            self.logger.warning(f"获取群成员列表失败(数据格式错误): {e}")
+        Returns:
+            群成员列表，如果获取失败则返回 None
+        """
+        # 使用 PlatformHelper 统一获取群成员列表（跨平台通用）
+        helper = PlatformHelper(event, self.context)
+        members_info = await helper.get_group_members(group_id)
+        
+        if members_info:
+            # 缓存群成员列表,设置合理的过期时间
+            cache_key = f"group_members_{group_id}"
+            self.group_members_cache[cache_key] = members_info
+            
+            # 对于大群(成员数>500),记录警告
+            if len(members_info) > 500:
+                self.logger.warning(f"群 {group_id} 成员数较多({len(members_info)}),建议调整缓存策略")
+            
+            return members_info
         
         return None
 
     async def _get_group_name(self, event: AstrMessageEvent, group_id: str) -> str:
-        """获取群名称 - 改进版本"""
+        """获取群名称（跨平台通用）
+        
+        使用 PlatformHelper 统一获取群组名称，支持所有平台。
+        
+        Args:
+            event: 消息事件对象
+            group_id: 群组ID
+            
+        Returns:
+            群组名称，如果获取失败则返回 "群{group_id}"
+        """
         try:
             # 首先尝试通过事件对象获取群组信息
             group_data = await event.get_group(group_id)
@@ -1254,27 +1221,11 @@ class MessageStatsPlugin(Star):
                        getattr(group_data, 'group_title', None) or \
                        f"群{group_id}"
             
-            # 如果事件对象获取失败，尝试通过API获取（跨平台兼容）
-            try:
-                # 尝试从 event.bot 获取（QQ平台）
-                client = None
-                if hasattr(event, 'bot') and hasattr(event.bot, 'api'):
-                    client = event.bot
-                # 尝试从 self.context 获取（Telegram平台）
-                elif hasattr(self, 'context') and self.context:
-                    try:
-                        client = self.context.bot
-                    except (AttributeError, KeyError, TypeError):
-                        pass
-                
-                if client and hasattr(client, 'api'):
-                    group_info = await client.api.call_action('get_group_info', group_id=group_id)
-                    if group_info and isinstance(group_info, dict):
-                        group_name = group_info.get('group_name') or group_info.get('group_title') or group_info.get('name')
-                        if group_name:
-                            return str(group_name).strip()
-            except (ConnectionError, asyncio.TimeoutError, ValueError, TypeError, AttributeError) as api_error:
-                self.logger.warning(f"通过API获取群组 {group_id} 名称失败: {api_error}")
+            # 如果事件对象获取失败，使用 PlatformHelper 统一通过API获取（跨平台通用）
+            helper = PlatformHelper(event, self.context)
+            group_name = await helper.get_group_name(group_id)
+            if group_name:
+                return str(group_name).strip()
             
             return f"群{group_id}"
         except (AttributeError, KeyError, TypeError, OSError) as e:
