@@ -112,9 +112,9 @@ class Validators:
             if not numeric_part.isdigit():
                 raise ValidationError("群组ID必须是数字")
         
-        # 对数字部分做长度检查，上限放宽至15以兼容Telegram超级群长ID
-        if len(numeric_part) < GROUP_ID_MIN_LENGTH or len(numeric_part) > 15:
-            raise ValidationError(f"群组ID数字部分长度应在{GROUP_ID_MIN_LENGTH}-15位之间")
+        # 对数字部分做长度检查，上限放宽至20以兼容Discord长ID（19位）
+        if len(numeric_part) < GROUP_ID_MIN_LENGTH or len(numeric_part) > 20:
+            raise ValidationError(f"群组ID数字部分长度应在{GROUP_ID_MIN_LENGTH}-20位之间")
         
         return group_id_str
     
