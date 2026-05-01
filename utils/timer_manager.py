@@ -278,7 +278,7 @@ class TimerManager:
                     missing_origins.append(group_id_str)
             
             if missing_origins:
-                self.logger.warning(f"⚠️ 以下群组缺少unified_msg_origin: {', '.join(missing_origins)}")
+                self.logger.info(f"📋 以下群组尚未收集unified_msg_origin: {', '.join(missing_origins)}")
                 self.logger.info("💡 解决方案: 在对应群组中发送任意消息以收集unified_msg_origin")
                 self.logger.info("📝 定时任务仍会启动，但推送时会失败直到unified_msg_origin被收集")
                 self.logger.info("📋 提示: 可以使用 #手动推送发言榜 命令测试推送功能")
