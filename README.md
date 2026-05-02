@@ -4,7 +4,7 @@
 
 > 🤖 **此插件由AI辅助生成**
 
-一个功能强大的AstrBot群消息统计插件，支持自动统计群成员发言次数并生成排行榜。现已支持跨平台（QQ/Telegram）使用。
+一个功能强大的AstrBot群消息统计插件，支持自动统计群成员发言次数并生成排行榜。
 
 ![Preview](https://github.com/xiaoruange39/Plugin-Preview-Image/blob/main/image/E2EB0A38BA876A2227FA99D997CA1969.jpg) 
 
