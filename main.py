@@ -1313,30 +1313,32 @@ class MessageStatsPlugin(Star):
         
         return None
 
-    async def _get_group_name(self, event: AstrMessageEvent, group_id: str) -> str:
+    async def _get_group_name(self, event: Optional[AstrMessageEvent], group_id: str) -> str:
         """获取群名称（跨平台通用）
         
         使用 PlatformHelper 统一获取群组名称，支持所有平台。
+        当 event 为 None 时（如定时推送场景），跳过事件对象获取，直接使用 API 或默认名称。
         
         Args:
-            event: 消息事件对象
+            event: 消息事件对象（可能为 None，如定时推送场景）
             group_id: 群组ID
             
         Returns:
             群组名称，如果获取失败则返回 "群{group_id}"
         """
         try:
-            # 首先尝试通过事件对象获取群组信息
-            group_data = await event.get_group(group_id)
-            if group_data:
-                # 简化群名获取逻辑，直接尝试常用属性
-                return getattr(group_data, 'group_name', None) or \
-                       getattr(group_data, 'name', None) or \
-                       getattr(group_data, 'title', None) or \
-                       getattr(group_data, 'group_title', None) or \
-                       f"群{group_id}"
+            # 首先尝试通过事件对象获取群组信息（仅在 event 不为 None 时）
+            if event is not None:
+                group_data = await event.get_group(group_id)
+                if group_data:
+                    # 简化群名获取逻辑，直接尝试常用属性
+                    return getattr(group_data, 'group_name', None) or \
+                           getattr(group_data, 'name', None) or \
+                           getattr(group_data, 'title', None) or \
+                           getattr(group_data, 'group_title', None) or \
+                           f"群{group_id}"
             
-            # 如果事件对象获取失败，使用 PlatformHelper 统一通过API获取（跨平台通用）
+            # 如果事件对象获取失败或 event 为 None，使用 PlatformHelper 统一通过API获取（跨平台通用）
             helper = PlatformHelper(event, self.context)
             group_name = await helper.get_group_name(group_id)
             if group_name:

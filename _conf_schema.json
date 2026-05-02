@@ -106,13 +106,13 @@
   "blocked_users": {
     "type": "list",
     "description": "屏蔽用户列表",
-    "hint": "屏蔽指定用户，使其不显示在发言榜上且不统计其发言数据。请输入完整的QQ号码。",
+    "hint": "屏蔽指定用户，使其不显示在发言榜上且不统计其发言数据。请输入完整的用户ID（QQ号或Telegram用户ID）。",
     "default": []
   },
   "blocked_groups": {
     "type": "list",
     "description": "屏蔽群聊列表",
-    "hint": "屏蔽指定群聊，使其不统计发言数据且无法使用排行榜指令。请输入完整的群号码。",
+    "hint": "屏蔽指定群聊，使其不统计发言数据且无法使用排行榜指令。请输入完整的群组ID（QQ群号或Telegram群组ID）。",
     "default": []
   }
 }
