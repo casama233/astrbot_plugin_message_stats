@@ -18,7 +18,7 @@
 ### 方式二：Git克隆
 ```bash
 cd /AstrBot/data/plugins/
-git clone https://github.com/AMYdd00/astrbot_plugin_message_stats.git
+git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 ```
 
 ## 📖 使用方法
@@ -197,9 +197,10 @@ astrbot_plugin_message_stats/
 
 ## 👨‍💻 作者
 
-**AMYdd00**
-- GitHub: [@AMYdd00](https://github.com/AMYdd00)
+**xiaoruange39**
+- GitHub: [@xiaoruange39](https://github.com/xiaoruange39)
 - 插件开发：AstrBot生态贡献者
+- QQ群：[QQ群](https://qm.qq.com/q/8kdJ2Bzf6S)
 
 ## 🙏 致谢
 
