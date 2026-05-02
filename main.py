@@ -17,7 +17,7 @@ from cachetools import TTLCache
 # AstrBot框架导入
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.event.filter import EventMessageType
-from astrbot.api.star import Context, Star, register, StarTools, put_config
+from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger as astrbot_logger
 
 # 本地模块导入
@@ -141,17 +141,6 @@ class MessageStatsPlugin(Star):
             
             # 确保config是字典类型
             config_dict = dict(self.config) if hasattr(self.config, 'items') else {}
-            
-            # 兼容处理：将Web面板中的 theme_switch_light_time / theme_switch_dark_time 
-            # 合并到 theme_switch_times 字典中
-            if 'theme_switch_light_time' in config_dict or 'theme_switch_dark_time' in config_dict:
-                theme_times = config_dict.get('theme_switch_times', {})
-                if isinstance(theme_times, dict):
-                    if 'theme_switch_light_time' in config_dict:
-                        theme_times['light'] = config_dict.pop('theme_switch_light_time')
-                    if 'theme_switch_dark_time' in config_dict:
-                        theme_times['dark'] = config_dict.pop('theme_switch_dark_time')
-                    config_dict['theme_switch_times'] = theme_times
             
             # 使用PluginConfig.from_dict()方法进行安全的配置转换
             config = PluginConfig.from_dict(config_dict)
@@ -351,17 +340,6 @@ class MessageStatsPlugin(Star):
         """
         # 更新插件配置（从AstrBot配置转换）
         self.plugin_config = self._convert_to_plugin_config()
-        
-        # 注册配置项到AstrBot Web面板（确保新配置项在Web面板中可见）
-        try:
-            put_config("astrbot_plugin_message_stats", "自动主题切换", "auto_theme_switch", 
-                      self.plugin_config.auto_theme_switch, "启用后根据时间自动切换排行榜主题")
-            put_config("astrbot_plugin_message_stats", "浅色主题开始时间", "theme_switch_light_time", 
-                      self.plugin_config.theme_switch_times.get("light", "06:00"), "浅色主题开始时间，格式 HH:MM")
-            put_config("astrbot_plugin_message_stats", "深色主题开始时间", "theme_switch_dark_time", 
-                      self.plugin_config.theme_switch_times.get("dark", "18:00"), "深色主题开始时间，格式 HH:MM")
-        except Exception as e:
-            self.logger.debug(f"注册Web面板配置项失败(不影响使用): {e}")
         
         # 创建图片生成器
         self.image_generator = ImageGenerator(self.plugin_config)
