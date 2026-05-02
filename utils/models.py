@@ -439,8 +439,6 @@ class PluginConfig:
         return {
             "theme": self.theme,
             "auto_theme_switch": self.auto_theme_switch,
-            "theme_switch_light_time": self.theme_switch_times.get("light", "06:00"),
-            "theme_switch_dark_time": self.theme_switch_times.get("dark", "18:00"),
             "is_admin_restricted": self.is_admin_restricted,
             "rand": self.rand,
             "if_send_pic": self.if_send_pic,
