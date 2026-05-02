@@ -389,6 +389,9 @@ class ImageGenerator:
         if not self.browser:
             await self.initialize()
         
+        # 每次生成图片时重新检查主题（支持自动主题切换实时生效）
+        self._update_template_path()
+        
         temp_path = None
         
         try:
