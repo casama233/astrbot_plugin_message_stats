@@ -28,11 +28,30 @@ class GroupDataStore:
     """群组数据存储管理器
     
     专门负责群组数据（JSON文件）的增删改查和修复。
+    
+    优化：添加延迟批量写入机制，避免每次消息都写盘。
+    - 数据修改先缓存在内存中
+    - 每30秒或积累10次修改后批量写入一次
+    - 大幅减少磁盘写入量
     """
+    
+    # 批量写入间隔（秒）
+    _BATCH_WRITE_INTERVAL = 30
+    # 最大积累修改次数
+    _MAX_DIRTY_COUNT = 10
     
     def __init__(self, groups_dir: Path, logger=None):
         self.groups_dir = groups_dir
         self.logger = logger or astrbot_logger
+        
+        # 延迟写入缓存：group_id -> (users, group_name)
+        self._dirty_cache: Dict[str, tuple] = {}
+        # 脏标记计数
+        self._dirty_count = 0
+        # 批量写入任务
+        self._batch_write_task: Optional[asyncio.Task] = None
+        # 停止事件
+        self._stop_event = asyncio.Event()
         # 目录创建延迟到首次使用时异步执行
     
     async def _ensure_groups_directory(self):
@@ -88,7 +107,9 @@ class GroupDataStore:
             return []
     
     async def save_group_data(self, group_id: str, users: List[UserData], group_name: str = None) -> bool:
-        """保存群组数据
+        """保存群组数据（延迟批量写入）
+        
+        数据先缓存在内存中，定期批量写入磁盘，大幅减少磁盘写入量。
         
         Args:
             group_id: 群组ID
@@ -96,45 +117,108 @@ class GroupDataStore:
             group_name: 可选的群组名称，如果提供则保存到数据文件中
             
         Returns:
-            bool: 保存是否成功
+            bool: 始终返回True（实际写入在后台批量执行）
         """
+        # 缓存数据到脏缓存
+        self._dirty_cache[group_id] = (users, group_name)
+        self._dirty_count += 1
+        
+        # 启动批量写入任务（如果尚未启动）
+        if self._batch_write_task is None or self._batch_write_task.done():
+            self._batch_write_task = asyncio.create_task(self._batch_write_loop())
+        
+        return True
+    
+    async def _batch_write_loop(self):
+        """批量写入循环：积累修改后一次性写入磁盘"""
+        try:
+            while self._dirty_cache:
+                # 等待一段时间或积累足够多的修改
+                try:
+                    await asyncio.wait_for(
+                        self._stop_event.wait(),
+                        timeout=self._BATCH_WRITE_INTERVAL
+                    )
+                    # 收到停止信号，立即写入所有脏数据
+                    break
+                except asyncio.TimeoutError:
+                    pass
+                
+                # 检查是否积累足够多的修改
+                if self._dirty_count < self._MAX_DIRTY_COUNT and not self._stop_event.is_set():
+                    continue
+                
+                # 执行批量写入
+                await self._flush_dirty_cache()
+                
+        except asyncio.CancelledError:
+            # 任务被取消时，尝试写入剩余脏数据
+            await self._flush_dirty_cache()
+            raise
+    
+    async def _flush_dirty_cache(self):
+        """将脏缓存中的数据批量写入磁盘"""
+        if not self._dirty_cache:
+            return
+        
+        # 取出当前所有脏数据
+        batch = dict(self._dirty_cache)
+        self._dirty_cache.clear()
+        self._dirty_count = 0
+        
+        for group_id, (users, group_name) in batch.items():
+            try:
+                await self._write_group_data_direct(group_id, users, group_name)
+            except Exception as e:
+                self.logger.error(f"批量写入群组数据失败 {group_id}: {e}")
+                # 写失败的放回脏缓存，下次重试
+                if group_id not in self._dirty_cache:
+                    self._dirty_cache[group_id] = (users, group_name)
+    
+    async def _write_group_data_direct(self, group_id: str, users: List[UserData], group_name: str = None):
+        """直接写入群组数据到磁盘（无缓存）"""
         file_path = self._get_group_file_path(group_id)
         
-        try:
-            # 尝试读取现有数据以保留 group_name
-            existing_group_name = None
-            if await aiofiles.os.path.exists(file_path):
-                try:
-                    async with aiofiles.open(str(file_path), 'r', encoding='utf-8') as f:
-                        content = await f.read()
-                        if content.strip():
-                            existing_data = json.loads(content)
-                            if isinstance(existing_data, dict):
-                                existing_group_name = existing_data.get('group_name')
-                except (json.JSONDecodeError, IOError):
-                    pass
-            
-            # 准备数据
-            data = {
-                'group_id': group_id,
-                'last_updated': datetime.now().isoformat(),
-                'users': [user.to_dict() for user in users]
-            }
-            
-            # 如果提供了新的 group_name，使用新的；否则保留原有的
-            final_group_name = group_name or existing_group_name
-            if final_group_name:
-                data['group_name'] = final_group_name
-            
-            json_content = await asyncio.to_thread(json.dumps, data, ensure_ascii=False, indent=2)
-            async with aiofiles.open(str(file_path), 'w', encoding='utf-8') as f:
-                await f.write(json_content)
-            
-            return True
-            
-        except (IOError, OSError) as e:
-            self.logger.error(f"保存群组数据失败 {group_id}: {e}")
-            return False
+        # 尝试读取现有数据以保留 group_name
+        existing_group_name = None
+        if await aiofiles.os.path.exists(file_path):
+            try:
+                async with aiofiles.open(str(file_path), 'r', encoding='utf-8') as f:
+                    content = await f.read()
+                    if content.strip():
+                        existing_data = json.loads(content)
+                        if isinstance(existing_data, dict):
+                            existing_group_name = existing_data.get('group_name')
+            except (json.JSONDecodeError, IOError):
+                pass
+        
+        # 准备数据（不使用 indent=2 减少文件体积）
+        data = {
+            'group_id': group_id,
+            'last_updated': datetime.now().isoformat(),
+            'users': [user.to_dict() for user in users]
+        }
+        
+        # 如果提供了新的 group_name，使用新的；否则保留原有的
+        final_group_name = group_name or existing_group_name
+        if final_group_name:
+            data['group_name'] = final_group_name
+        
+        # 使用 indent=None 减少文件体积（约减少50%）
+        json_content = await asyncio.to_thread(json.dumps, data, ensure_ascii=False, indent=None, separators=(',', ':'))
+        async with aiofiles.open(str(file_path), 'w', encoding='utf-8') as f:
+            await f.write(json_content)
+    
+    async def flush_all(self):
+        """立即将所有脏数据写入磁盘（插件关闭时调用）"""
+        self._stop_event.set()
+        if self._batch_write_task and not self._batch_write_task.done():
+            try:
+                await asyncio.wait_for(self._batch_write_task, timeout=10)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+        # 确保写入剩余脏数据
+        await self._flush_dirty_cache()
     
     async def delete_group_data(self, group_id: str) -> bool:
         """删除群组数据"""

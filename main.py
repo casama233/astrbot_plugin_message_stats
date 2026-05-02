@@ -451,6 +451,9 @@ class MessageStatsPlugin(Star):
         try:
             self.logger.info("群发言统计插件卸载中...")
             
+            # 刷新所有脏数据到磁盘（延迟写入优化）
+            await self.data_manager.flush_all()
+            
             # 清理图片生成器
             if self.image_generator:
                 await self.image_generator.cleanup()

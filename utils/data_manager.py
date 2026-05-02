@@ -1041,4 +1041,9 @@ class DataManager:
             self.logger.error(f"备份群组 {group_id} 数据时发生未知错误: {e}")
             return None
     
+    async def flush_all(self):
+        """立即将所有脏数据写入磁盘（插件关闭时调用）"""
+        await self.group_store.flush_all()
+        self.logger.info("所有数据已刷新到磁盘")
+    
     # 移除重复的方法，统一使用cache_manager的方法
