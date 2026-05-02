@@ -142,26 +142,29 @@ class GroupDataStore:
         try:
             while self._dirty_cache:
                 # 等待触发事件（积累够 _FLUSH_THRESHOLD 次）或停止信号
-                # 使用 wait_for 同时监听两个事件
-                write_task = asyncio.create_task(self._write_trigger.wait())
-                stop_task = asyncio.create_task(self._stop_event.wait())
-                
-                done, pending = await asyncio.wait(
-                    [write_task, stop_task],
-                    return_when=asyncio.FIRST_COMPLETED
-                )
-                
-                # 取消未完成的任务
-                for task in pending:
-                    task.cancel()
-                
-                if self._stop_event.is_set():
-                    # 收到停止信号，写盘后退出
-                    break
-                
-                # 触发事件已 set，清除并写盘
-                self._write_trigger.clear()
-                await self._flush_dirty_cache()
+                # 使用 asyncio.Event.wait() 直接等待，不创建额外task
+                # 通过 wait_for 添加超时，避免永久阻塞
+                try:
+                    # 同时等待写触发和停止事件
+                    # 使用 asyncio.wait 监听两个事件
+                    write_fut = asyncio.ensure_future(self._write_trigger.wait())
+                    stop_fut = asyncio.ensure_future(self._stop_event.wait())
+                    
+                    done, pending = await asyncio.wait(
+                        [write_fut, stop_fut],
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+                    
+                    for task in pending:
+                        task.cancel()
+                    
+                    if self._stop_event.is_set():
+                        break
+                    
+                    self._write_trigger.clear()
+                    await self._flush_dirty_cache()
+                except asyncio.CancelledError:
+                    raise
                 
         except asyncio.CancelledError:
             await self._flush_dirty_cache()

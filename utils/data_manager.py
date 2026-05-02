@@ -75,7 +75,10 @@ class DataManager:
         )
         
         # 群组级别的锁机制，防止并发安全问题
-        self._group_locks: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        # 使用 TTLCache 自动清理长时间不用的锁，防止内存泄漏
+        self._group_locks: Dict[str, asyncio.Lock] = {}
+        self._group_lock_ttl = 3600  # 1小时无访问自动清理
+        self._group_lock_access: Dict[str, float] = {}
         
         # 确保目录存在
         self._ensure_directories()
@@ -100,6 +103,38 @@ class DataManager:
         directories = [self.data_dir, self.groups_dir, self.cache_dir]
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
+    
+    def _get_group_lock(self, group_id: str) -> asyncio.Lock:
+        """获取群组级别的锁，自动清理长时间不用的锁
+        
+        使用访问时间记录，超过 _group_lock_ttl（1小时）未访问的锁会被清理。
+        
+        Args:
+            group_id: 群组ID
+            
+        Returns:
+            asyncio.Lock: 群组锁
+        """
+        now = time.time()
+        
+        # 定期清理过期锁（每100次访问清理一次）
+        if len(self._group_locks) > 100 and len(self._group_locks) % 100 == 0:
+            expired = [
+                gid for gid, last_access in list(self._group_lock_access.items())
+                if now - last_access > self._group_lock_ttl
+            ]
+            for gid in expired:
+                self._group_locks.pop(gid, None)
+                self._group_lock_access.pop(gid, None)
+            if expired:
+                self.logger.debug(f"清理过期群组锁: {len(expired)}个")
+        
+        # 获取或创建锁
+        if group_id not in self._group_locks:
+            self._group_locks[group_id] = asyncio.Lock()
+        
+        self._group_lock_access[group_id] = now
+        return self._group_locks[group_id]
     
     async def initialize(self):
         """初始化数据管理器
@@ -361,7 +396,7 @@ class DataManager:
             raise ValueError(f"用户ID必须是数字字符串，当前值: {user_id}")
         
         # 获取群组级别的锁，确保同一群组的数据操作串行化
-        group_lock = self._group_locks[group_id]
+        group_lock = self._get_group_lock(group_id)
         
         async with group_lock:
             # 获取现有数据
