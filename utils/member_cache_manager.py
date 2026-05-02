@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import time
 from typing import List, Optional, Dict, Any
 from cachetools import TTLCache
 
@@ -21,12 +22,22 @@ class MemberCacheManager:
     
     分层缓存策略：
     1. 昵称缓存（user_nickname_cache）：TTLCache，最高效
-    2. 群成员字典缓存（group_members_dict_cache）：普通dict，中等效率
+    2. 群成员字典缓存（group_members_dict_cache）：TTLCache，带TTL
     3. 群成员列表缓存（group_members_cache）：TTLCache，用于批量操作
     4. API获取：仅在以上缓存均失效时调用
     
     使用异步锁防止缓存击穿：同一时间对同一用户ID只会发起一次API请求。
+    
+    内存安全：
+    - 所有缓存字典均使用 TTLCache 或限制大小
+    - 异步锁字典定期清理，防止无限增长
+    - 里程碑缓存使用独立的小容量 TTLCache
     """
+
+    # 锁字典清理间隔（秒）
+    _LOCK_CLEANUP_INTERVAL = 3600  # 1小时清理一次
+    # 锁最大存活时间（秒）
+    _LOCK_MAX_AGE = 7200  # 2小时无访问则清理
 
     def __init__(self, context, cache_ttl: int = 300, nickname_cache_ttl: int = 600):
         """初始化缓存管理器
@@ -41,28 +52,73 @@ class MemberCacheManager:
         # 群成员列表缓存（TTLCache，用于批量操作）
         self.group_members_cache = TTLCache(maxsize=100, ttl=cache_ttl)
         
-        # 群成员字典缓存（普通dict，用于快速查找）
-        self.group_members_dict_cache: Dict[str, Dict[str, Any]] = {}
+        # 群成员字典缓存（TTLCache，用于快速查找）- 改为TTLCache防止无限增长
+        self.group_members_dict_cache = TTLCache(maxsize=100, ttl=cache_ttl)
         
         # 用户昵称缓存（TTLCache，最高效）
         self.user_nickname_cache = TTLCache(maxsize=500, ttl=nickname_cache_ttl)
+        
+        # 里程碑缓存（独立的小容量TTLCache，防止挤占昵称缓存）
+        self._milestone_cache = TTLCache(maxsize=200, ttl=86400)  # 24小时过期
         
         # 异步锁字典：防止同一用户ID的并发API请求（缓存击穿防护）
         self._fetch_locks: Dict[str, asyncio.Lock] = {}
         # 群成员列表获取锁
         self._members_locks: Dict[str, asyncio.Lock] = {}
+        # 锁的最后访问时间（用于清理）
+        self._lock_access_time: Dict[str, float] = {}
+        # 上次清理时间
+        self._last_lock_cleanup: float = time.time()
     
     def _get_fetch_lock(self, user_id: str) -> asyncio.Lock:
         """获取或创建用户ID对应的异步锁"""
+        # 定期清理过期锁
+        self._cleanup_locks_if_needed()
+        
         if user_id not in self._fetch_locks:
             self._fetch_locks[user_id] = asyncio.Lock()
+        self._lock_access_time[user_id] = time.time()
         return self._fetch_locks[user_id]
     
     def _get_members_lock(self, group_id: str) -> asyncio.Lock:
         """获取或创建群组ID对应的异步锁"""
+        # 定期清理过期锁
+        self._cleanup_locks_if_needed()
+        
         if group_id not in self._members_locks:
             self._members_locks[group_id] = asyncio.Lock()
+        self._lock_access_time[f"members_{group_id}"] = time.time()
         return self._members_locks[group_id]
+    
+    def _cleanup_locks_if_needed(self):
+        """定期清理长时间未使用的锁，防止内存泄漏"""
+        now = time.time()
+        if now - self._last_lock_cleanup < self._LOCK_CLEANUP_INTERVAL:
+            return
+        
+        self._last_lock_cleanup = now
+        cleanup_threshold = now - self._LOCK_MAX_AGE
+        
+        # 清理 fetch_locks
+        expired_fetch = [
+            uid for uid in list(self._fetch_locks.keys())
+            if self._lock_access_time.get(uid, 0) < cleanup_threshold
+        ]
+        for uid in expired_fetch:
+            del self._fetch_locks[uid]
+            self._lock_access_time.pop(uid, None)
+        
+        # 清理 members_locks
+        expired_members = [
+            gid for gid in list(self._members_locks.keys())
+            if self._lock_access_time.get(f"members_{gid}", 0) < cleanup_threshold
+        ]
+        for gid in expired_members:
+            del self._members_locks[gid]
+            self._lock_access_time.pop(f"members_{gid}", None)
+        
+        if expired_fetch or expired_members:
+            logger.debug(f"清理过期锁: {len(expired_fetch)}个用户锁, {len(expired_members)}个群锁")
     
     # ========== 公开方法 ==========
     
@@ -202,12 +258,12 @@ class MemberCacheManager:
     def is_milestone_cached(self, group_id: str, user_id: str, count: int) -> bool:
         """检查里程碑是否已缓存（防止重复推送）"""
         milestone_cache_key = f"milestone_{group_id}_{user_id}_{count}"
-        return milestone_cache_key in self.user_nickname_cache
+        return milestone_cache_key in self._milestone_cache
     
     def mark_milestone_cached(self, group_id: str, user_id: str, count: int):
         """标记里程碑已推送"""
         milestone_cache_key = f"milestone_{group_id}_{user_id}_{count}"
-        self.user_nickname_cache[milestone_cache_key] = True
+        self._milestone_cache[milestone_cache_key] = True
     
     def clear_all(self):
         """清理所有缓存"""
