@@ -5,11 +5,9 @@ HTML模板模块
 
 import aiofiles
 import aiofiles.os
-import logging
 from pathlib import Path
 
-# 设置日志记录器
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 # 模板文件路径
 TEMPLATE_DIR = Path(__file__).parent

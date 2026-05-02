@@ -13,13 +13,8 @@ from datetime import datetime, date
 from typing import List, Optional, Dict, Any
 from enum import Enum
 
-# 使用框架的日志记录器 - 使用可选导入避免测试环境问题
-try:
-    from astrbot.api import logger
-except ImportError:
-    # 测试环境或导入失败时使用标准logging
-    import logging
-    logger = logging.getLogger(__name__)
+# 使用框架的日志记录器
+from astrbot.api import logger
 
 
 
