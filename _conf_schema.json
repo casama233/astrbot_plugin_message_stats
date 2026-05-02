@@ -88,5 +88,24 @@
     "hint": "屏蔽指定群聊，使其不统计发言数据且无法使用排行榜指令。请输入完整的群号码。",
     "default": [],
     "obvious_hint": true
+  },
+  "auto_theme_switch": {
+    "type": "bool",
+    "description": "自动主题切换",
+    "hint": "启用后根据时间自动切换排行榜主题（浅色/深色）",
+    "default": false,
+    "obvious_hint": true
+  },
+  "theme_switch_light_time": {
+    "type": "string",
+    "description": "浅色主题开始时间",
+    "hint": "浅色主题开始时间，格式 HH:MM，例如 06:00",
+    "default": "06:00"
+  },
+  "theme_switch_dark_time": {
+    "type": "string",
+    "description": "深色主题开始时间",
+    "hint": "深色主题开始时间，格式 HH:MM，例如 18:00",
+    "default": "18:00"
   }
 }

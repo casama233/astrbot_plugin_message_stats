@@ -142,6 +142,17 @@ class MessageStatsPlugin(Star):
             # 确保config是字典类型
             config_dict = dict(self.config) if hasattr(self.config, 'items') else {}
             
+            # 兼容处理：将Web面板中的 theme_switch_light_time / theme_switch_dark_time 
+            # 合并到 theme_switch_times 字典中
+            if 'theme_switch_light_time' in config_dict or 'theme_switch_dark_time' in config_dict:
+                theme_times = config_dict.get('theme_switch_times', {})
+                if isinstance(theme_times, dict):
+                    if 'theme_switch_light_time' in config_dict:
+                        theme_times['light'] = config_dict.pop('theme_switch_light_time')
+                    if 'theme_switch_dark_time' in config_dict:
+                        theme_times['dark'] = config_dict.pop('theme_switch_dark_time')
+                    config_dict['theme_switch_times'] = theme_times
+            
             # 使用PluginConfig.from_dict()方法进行安全的配置转换
             config = PluginConfig.from_dict(config_dict)
             
