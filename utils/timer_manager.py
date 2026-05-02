@@ -451,7 +451,13 @@ class TimerManager:
             self.logger.error(f"实例 #{self._instance_id} 定时任务循环异常: {e}")
             self.status = TimerTaskStatus.ERROR
             TimerManager._global_is_executing = False
-            # 5分钟后重试
+            # 限制重试次数，防止无限递归导致内存泄漏
+            retry_count = getattr(self, '_timer_retry_count', 0)
+            if retry_count >= 3:
+                self.logger.critical(f"实例 #{self._instance_id} 定时任务已重试 {retry_count} 次仍失败，停止重试")
+                return
+            self._timer_retry_count = retry_count + 1
+            self.logger.info(f"实例 #{self._instance_id} 将在5分钟后重试 (第{self._timer_retry_count}次)")
             await asyncio.sleep(300)
             if not self._stop_event.is_set():
                 self.logger.info(f"实例 #{self._instance_id} 尝试重启定时任务")
@@ -461,6 +467,8 @@ class TimerManager:
             self.logger.error(f"实例 #{self._instance_id} 定时任务未知异常: {type(e).__name__}: {e}")
             self.status = TimerTaskStatus.ERROR
             TimerManager._global_is_executing = False
+            # 未知异常不重试，避免无限递归
+            self.logger.critical(f"实例 #{self._instance_id} 定时任务因未知异常停止，不再自动重试")
     
     @safe_timer_operation(default_return=False)
     async def _execute_push_task(self, config) -> bool:
