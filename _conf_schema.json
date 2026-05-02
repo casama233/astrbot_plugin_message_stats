@@ -5,6 +5,18 @@
     "hint": "启用后根据时间自动切换排行榜主题（浅色/深色），会覆盖下方的手动主题设置",
     "default": false
   },
+  "theme_switch_light_time": {
+    "type": "string",
+    "description": "浅色主题开始时间",
+    "hint": "浅色主题开始时间，格式 HH:MM，例如 06:00",
+    "default": "06:00"
+  },
+  "theme_switch_dark_time": {
+    "type": "string",
+    "description": "深色主题开始时间",
+    "hint": "深色主题开始时间，格式 HH:MM，例如 18:00",
+    "default": "18:00"
+  },
   "theme": {
     "type": "string",
     "description": "排行榜主题风格",
