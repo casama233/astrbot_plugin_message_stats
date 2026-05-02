@@ -144,6 +144,8 @@ astrbot_plugin_message_stats/
 本插件现已支持以下平台：
 - **QQ（OneBot）** - 完整功能支持
 - **Telegram** - 完整功能支持（包括负数群组ID、贴纸/图片消息统计等）
+- **Discord** - 完整功能支持
+- **飞书（Lark/Feishu）** - 完整功能支持
 
 ### Telegram 用户注意事项
 - Telegram 群组ID为负数（如 `-1001234567890`），插件已完全兼容
