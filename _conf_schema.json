@@ -9,13 +9,13 @@
     "type": "string",
     "description": "浅色主题开始时间",
     "hint": "浅色主题开始时间，格式 HH:MM，例如 06:00",
-    "default": "06:00"
+    "default": ""
   },
   "theme_switch_dark_time": {
     "type": "string",
     "description": "深色主题开始时间",
     "hint": "深色主题开始时间，格式 HH:MM，例如 18:00",
-    "default": "18:00"
+    "default": ""
   },
   "theme": {
     "type": "string",

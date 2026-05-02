@@ -498,17 +498,16 @@ class PluginConfig:
         config.auto_theme_switch = data.get("auto_theme_switch", False)
         
         # 兼容处理：从 theme_switch_times 字典或独立的 theme_switch_light_time/theme_switch_dark_time 字段读取
+        light_time = data.get("theme_switch_light_time", "")
+        dark_time = data.get("theme_switch_dark_time", "")
         theme_times = data.get("theme_switch_times", {})
         if isinstance(theme_times, dict):
-            config.theme_switch_times = {
-                "light": theme_times.get("light") or data.get("theme_switch_light_time", "06:00"),
-                "dark": theme_times.get("dark") or data.get("theme_switch_dark_time", "18:00")
-            }
-        else:
-            config.theme_switch_times = {
-                "light": data.get("theme_switch_light_time", "06:00"),
-                "dark": data.get("theme_switch_dark_time", "18:00")
-            }
+            light_time = theme_times.get("light") or light_time
+            dark_time = theme_times.get("dark") or dark_time
+        config.theme_switch_times = {
+            "light": light_time if light_time else "06:00",
+            "dark": dark_time if dark_time else "18:00"
+        }
         config.is_admin_restricted = data.get("is_admin_restricted", 0)
         config.rand = data.get("rand", 20)
         config.if_send_pic = if_send_pic
