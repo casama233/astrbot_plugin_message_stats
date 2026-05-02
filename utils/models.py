@@ -412,7 +412,7 @@ class PluginConfig:
         
         # 发言里程碑推送配置
         self.milestone_enabled = False
-        self.milestone_targets = [666, 1000, 5000, 10000]
+        self.milestone_targets = [666, 1000, 2333, 5000, 6666, 10000, 23333]
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典
@@ -519,7 +519,7 @@ class PluginConfig:
         config.blocked_users = data.get("blocked_users", [])
         config.blocked_groups = data.get("blocked_groups", [])
         config.milestone_enabled = data.get("milestone_enabled", False)
-        config.milestone_targets = data.get("milestone_targets", [666, 1000, 5000, 10000])
+        config.milestone_targets = data.get("milestone_targets", [666, 1000, 2333, 5000, 6666, 10000, 23333])
         
         return config
 
