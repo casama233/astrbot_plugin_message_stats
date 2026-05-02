@@ -156,7 +156,11 @@ class MessageStatsPlugin(Star):
             # 使用PluginConfig.from_dict()方法进行安全的配置转换
             config = PluginConfig.from_dict(config_dict)
             return config
-        
+        except Exception as e:
+            self.logger.error(f"配置转换失败: {e}")
+            self.logger.info("使用默认配置继续运行")
+            return PluginConfig()
+    
     async def _collect_group_unified_msg_origin(self, event: AstrMessageEvent):
         """收集群组的unified_msg_origin和群组名称
         
