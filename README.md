@@ -83,18 +83,27 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 ## ⚙️ 配置说明
 
 ### 插件配置
-插件支持以下配置选项：
-- `rand`: 排行榜显示人数（默认20人，范围1-100）
-- `if_send_pic`: 显示模式（1=图片模式，0=文字模式）
-- `timer_enabled`: 定时推送开关（0=关闭，1=开启）
-- `timer_time`: 定时推送时间（格式：HH:MM）
-- `timer_groups`: 定时推送群组列表
-- `timer_type`: 定时推送类型（1=图片，0=文字）
-- `blocked_users`: 屏蔽用户列表（不统计发言且不显示在排行榜）
-- `blocked_groups`: 屏蔽群聊列表（不统计发言且无法使用指令）
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `theme` | string | `default` | 排行榜主题风格：`default`（经典浅色）、`liquid_glass`（液态玻璃）、`liquid_glass_dark`（液态玻璃暗色） |
+| `auto_theme_switch` | bool | `false` | 是否根据时间自动切换主题（浅色/深色），启用后会覆盖手动设置的 theme |
+| `theme_switch_light_time` | string | `06:00` | 浅色主题开始时间，格式 HH:MM |
+| `theme_switch_dark_time` | string | `18:00` | 深色主题开始时间，格式 HH:MM |
+| `rand` | int | `20` | 排行榜显示人数（1-100） |
+| `if_send_pic` | string | `图片` | 排行榜输出模式：`图片` 或 `文字` |
+| `detailed_logging_enabled` | bool | `true` | 是否开启详细日志记录 |
+| `timer_enabled` | bool | `false` | 是否启用定时推送排行榜功能 |
+| `timer_push_time` | string | `09:00` | 定时推送时间（支持 HH:MM 或 cron 格式） |
+| `timer_target_groups` | list | `[]` | 定时推送目标群组ID列表（支持群号或 unified_msg_origin 格式） |
+| `timer_rank_type` | string | `daily` | 定时推送排行榜类型：`daily`/`total`/`weekly`/`monthly`/`yearly`/`lastyear` |
+| `milestone_enabled` | bool | `false` | 发言里程碑推送，用户发言达到里程碑次数时自动推送排行榜 |
+| `milestone_targets` | list | `[666, 1000, 2333, 5000, 6666, 10000, 23333]` | 触发推送的发言次数里程碑列表 |
+| `blocked_users` | list | `[]` | 屏蔽用户列表（支持QQ号或Telegram用户ID） |
+| `blocked_groups` | list | `[]` | 屏蔽群聊列表（支持QQ群号或Telegram群组ID） |
 
 ### 配置方式
-1. 通过插件配置（推荐）
+1. 通过AstrBot Web面板配置（推荐）
 2. 通过命令配置
 3. 编辑配置文件：`data/config.json`
 
@@ -108,13 +117,15 @@ astrbot_plugin_message_stats/
 ├── requirements.txt       # 依赖包
 ├── config.yaml           # 配置文件
 ├── example_config.json   # 配置示例
-├── _conf_schema.json     # 配置架构
+├── _conf_schema.json     # 配置架构（Web面板配置定义）
 ├── data/                 # 数据目录
-│   └── config.json       # 用户配置
+│   ├── config.json       # 用户配置
+│   └── cmd_config.json   # 命令配置
 ├── templates/            # 模板目录
 │   ├── __init__.py
-│   ├── rank_template.html # 排行榜模板
-│   └── user_item_macro.html # 用户项模板
+│   ├── rank_template.html # 排行榜模板（default主题）
+│   ├── rank_template_liquid_glass.html # 液态玻璃主题模板
+│   └── rank_template_liquid_glass_dark.html # 液态玻璃暗色主题模板
 └── utils/                # 工具模块
     ├── __init__.py
     ├── data_manager.py   # 数据管理
@@ -123,11 +134,34 @@ astrbot_plugin_message_stats/
     ├── file_utils.py     # 文件工具
     ├── image_generator.py # 图片生成
     ├── models.py         # 数据模型
+    ├── platform_helper.py # 跨平台兼容辅助
     ├── timer_manager.py  # 定时管理
     └── validators.py     # 数据验证
 ```
 
+## 🌐 跨平台支持
+
+本插件现已支持以下平台：
+- **QQ（OneBot）** - 完整功能支持
+- **Telegram** - 完整功能支持（包括负数群组ID、贴纸/图片消息统计等）
+- **Discord** - 完整功能支持
+- **飞书（Lark/Feishu）** - 完整功能支持
+
+### Telegram 用户注意事项
+- Telegram 群组ID为负数（如 `-1001234567890`），插件已完全兼容
+- 定时推送目标群组支持填写 `unified_msg_origin` 格式（如 `BotName:GroupMessage:123456789`）
+- 支持统计贴纸、图片等非文本消息
+
 ## 📝 更新日志
+
+### v1.8.0 (2026-05-02)
+- ✅ 跨平台兼容重构，全面支持 Telegram
+- ✅ 新增 `PlatformHelper` 统一跨平台API调用
+- ✅ 新增自动主题切换功能（根据时间自动切换浅色/深色主题）
+- ✅ 新增发言里程碑推送功能
+- ✅ 修复 Telegram 负数群组ID兼容性问题
+- ✅ 修复定时推送目标群组支持 unified_msg_origin 格式
+- ✅ 优化日志级别，减少不必要的警告
 
 ### v1.7.4 (2026-01-02)
 - ✅ 添加屏蔽群聊列表配置项

@@ -142,22 +142,25 @@ class MessageStatsPlugin(Star):
             # 确保config是字典类型
             config_dict = dict(self.config) if hasattr(self.config, 'items') else {}
             
+            # 兼容处理：将Web面板中的 theme_switch_light_time / theme_switch_dark_time 
+            # 合并到 theme_switch_times 字典中
+            if 'theme_switch_light_time' in config_dict or 'theme_switch_dark_time' in config_dict:
+                theme_times = config_dict.get('theme_switch_times', {})
+                if isinstance(theme_times, dict):
+                    if 'theme_switch_light_time' in config_dict:
+                        theme_times['light'] = config_dict.pop('theme_switch_light_time')
+                    if 'theme_switch_dark_time' in config_dict:
+                        theme_times['dark'] = config_dict.pop('theme_switch_dark_time')
+                    config_dict['theme_switch_times'] = theme_times
+            
             # 使用PluginConfig.from_dict()方法进行安全的配置转换
             config = PluginConfig.from_dict(config_dict)
-            
-            # 记录配置转换情况
-            if config.timer_enabled and config.timer_target_groups:
-                self.logger.info(f"配置转换完成: 定时功能已启用, 目标群组: {config.timer_target_groups}")
-                # 如果有unified_msg_origin信息，通知定时任务更新
-                if hasattr(self, 'group_unified_msg_origins') and self.group_unified_msg_origins:
-                    self.logger.info(f"当前unified_msg_origin映射表: {list(self.group_unified_msg_origins.keys())}")
-            
             return config
         except Exception as e:
             self.logger.error(f"配置转换失败: {e}")
             self.logger.info("使用默认配置继续运行")
             return PluginConfig()
-        
+    
     async def _collect_group_unified_msg_origin(self, event: AstrMessageEvent):
         """收集群组的unified_msg_origin和群组名称
         
@@ -606,30 +609,15 @@ class MessageStatsPlugin(Star):
         
         执行实际的消息统计更新操作，并记录结果日志。
         智能缓存管理：检查昵称变化，只在必要时更新缓存。
+        支持发言里程碑检测：当用户发言达到里程碑次数时自动推送排行榜。
         
         Args:
             group_id (str): 验证后的群组ID
             user_id (str): 验证后的用户ID
             nickname (str): 验证后的用户昵称
-            
-        Raises:
-            KeyError: 当数据格式错误时抛出
-            asyncio.TimeoutError: 当异步操作超时时抛出
-            ConnectionError: 当连接错误时抛出
-            asyncio.CancelledError: 当操作取消时抛出
-            IOError: 当文件操作错误时抛出
-            OSError: 当系统操作错误时抛出
-            AttributeError: 当属性访问错误时抛出
-            RuntimeError: 当运行时错误时抛出
-            ImportError: 当导入错误时抛出
-            FileNotFoundError: 当文件未找到时抛出
-            PermissionError: 当权限错误时抛出
-            UnicodeError: 当编码错误时抛出
-            MemoryError: 当内存错误时抛出
-            SystemError: 当系统错误时抛出
         """
-        # 直接使用data_manager更新用户消息
-        success = await self.data_manager.update_user_message(group_id, user_id, nickname)
+        # 直接使用data_manager更新用户消息，同时获取更新后的总发言数
+        success, message_count = await self.data_manager.update_user_message(group_id, user_id, nickname)
         
         if success:
             # 智能缓存管理：检查昵称变化
@@ -648,8 +636,105 @@ class MessageStatsPlugin(Star):
                 if self.plugin_config.detailed_logging_enabled:
                     self.logger.debug(f"昵称未变化，保持缓存: {nickname}")
                     self.logger.info(f"记录消息统计: {nickname}")
+            
+            # 发言里程碑检测（使用update_user_message返回的message_count，无需额外查询）
+            await self._check_milestone(group_id, user_id, nickname, message_count)
         else:
             self.logger.error(f"记录消息统计失败: {nickname}")
+    
+    async def _check_milestone(self, group_id: str, user_id: str, nickname: str, current_count: int):
+        """检测用户发言是否达到里程碑，达到则自动推送排行榜
+        
+        性能优化：仅在 milestone_enabled=True 且 current_count 在 milestone_targets 中时才执行后续操作。
+        使用缓存防止同一里程碑重复推送。
+        
+        Args:
+            group_id (str): 群组ID
+            user_id (str): 用户ID
+            nickname (str): 用户昵称
+            current_count (int): 用户当前总发言数（由 update_user_message 直接返回）
+        """
+        # 快速短路：里程碑功能未启用或目标列表为空，直接返回
+        if not self.plugin_config.milestone_enabled or not self.plugin_config.milestone_targets:
+            return
+        
+        # 快速检查：当前发言数是否在里程碑目标中（O(1) 集合查找）
+        milestone_set = set(self.plugin_config.milestone_targets)
+        if current_count not in milestone_set:
+            return
+        
+        # 检查是否已经推送过该里程碑（使用缓存防止重复推送）
+        milestone_cache_key = f"milestone_{group_id}_{user_id}_{current_count}"
+        if milestone_cache_key in self.user_nickname_cache:
+            return  # 已推送过，跳过
+        
+        # 标记已推送（先标记再执行，防止并发重复推送）
+        self.user_nickname_cache[milestone_cache_key] = True
+        
+        self.logger.info(f"🎉 用户 {nickname} 发言达到 {current_count} 次里程碑，准备推送排行榜")
+        
+        try:
+            # 获取群组的 unified_msg_origin
+            unified_msg_origin = self.group_unified_msg_origins.get(str(group_id))
+            if not unified_msg_origin:
+                self.logger.warning(f"群组 {group_id} 缺少 unified_msg_origin，无法推送里程碑")
+                return
+            
+            # 获取群组数据并生成排行榜
+            group_data = await self.data_manager.get_group_data(group_id)
+            if not group_data:
+                return
+            
+            # 使用总排行榜（total）展示所有历史数据
+            rank_type = RankType.TOTAL
+            filtered_data = await self._filter_data_by_rank_type(group_data, rank_type)
+            if not filtered_data:
+                return
+            
+            # 排序并限制数量
+            filtered_data.sort(key=lambda x: x[1], reverse=True)
+            limited_data = filtered_data[:self.plugin_config.rand]
+            
+            users_for_rank = []
+            for user_data_item, count in limited_data:
+                user_data_item.display_total = count
+                users_for_rank.append(user_data_item)
+            
+            # 创建群组信息
+            group_info = GroupInfo(group_id=str(group_id))
+            group_name = await self._get_group_name(None, group_id)
+            group_info.group_name = group_name
+            
+            # 生成标题
+            title = f"🎉 恭喜 {nickname} 发言突破 {current_count} 次！"
+            
+            # 生成排行榜图片
+            image_path = await self.image_generator.generate_rank_image(
+                users_for_rank, group_info, title, user_id
+            )
+            
+            if not image_path:
+                self.logger.warning("里程碑推送：图片生成失败")
+                return
+            
+            # 构建消息并推送
+            from astrbot.api.event import MessageChain
+            message_chain = MessageChain()
+            message_chain = message_chain.file_image(image_path)
+            
+            await self.context.send_message(unified_msg_origin, message_chain)
+            self.logger.info(f"✅ 里程碑推送成功: {nickname} 发言 {current_count} 次")
+            
+            # 清理临时图片
+            import aiofiles
+            if await aiofiles.os.path.exists(image_path):
+                try:
+                    await aiofiles.os.unlink(image_path)
+                except OSError as e:
+                    self.logger.warning(f"清理里程碑图片失败: {e}")
+                    
+        except Exception as e:
+            self.logger.error(f"里程碑推送失败: {e}", exc_info=True)
     
     # ========== 排行榜命令 ==========
     
@@ -1228,30 +1313,32 @@ class MessageStatsPlugin(Star):
         
         return None
 
-    async def _get_group_name(self, event: AstrMessageEvent, group_id: str) -> str:
+    async def _get_group_name(self, event: Optional[AstrMessageEvent], group_id: str) -> str:
         """获取群名称（跨平台通用）
         
         使用 PlatformHelper 统一获取群组名称，支持所有平台。
+        当 event 为 None 时（如定时推送场景），跳过事件对象获取，直接使用 API 或默认名称。
         
         Args:
-            event: 消息事件对象
+            event: 消息事件对象（可能为 None，如定时推送场景）
             group_id: 群组ID
             
         Returns:
             群组名称，如果获取失败则返回 "群{group_id}"
         """
         try:
-            # 首先尝试通过事件对象获取群组信息
-            group_data = await event.get_group(group_id)
-            if group_data:
-                # 简化群名获取逻辑，直接尝试常用属性
-                return getattr(group_data, 'group_name', None) or \
-                       getattr(group_data, 'name', None) or \
-                       getattr(group_data, 'title', None) or \
-                       getattr(group_data, 'group_title', None) or \
-                       f"群{group_id}"
+            # 首先尝试通过事件对象获取群组信息（仅在 event 不为 None 时）
+            if event is not None:
+                group_data = await event.get_group(group_id)
+                if group_data:
+                    # 简化群名获取逻辑，直接尝试常用属性
+                    return getattr(group_data, 'group_name', None) or \
+                           getattr(group_data, 'name', None) or \
+                           getattr(group_data, 'title', None) or \
+                           getattr(group_data, 'group_title', None) or \
+                           f"群{group_id}"
             
-            # 如果事件对象获取失败，使用 PlatformHelper 统一通过API获取（跨平台通用）
+            # 如果事件对象获取失败或 event 为 None，使用 PlatformHelper 统一通过API获取（跨平台通用）
             helper = PlatformHelper(event, self.context)
             group_name = await helper.get_group_name(group_id)
             if group_name:

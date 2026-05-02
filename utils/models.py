@@ -368,7 +368,9 @@ class PluginConfig:
     支持数据序列化和反序列化，便于配置文件的读写。
     
     Attributes:
-        theme (str): 排行榜主题风格，支持 'default'（经典浅色）和 'liquid_glass'（液态玻璃）
+        theme (str): 排行榜主题风格，支持 'default'（经典浅色）、'liquid_glass'（液态玻璃）、'liquid_glass_dark'（液态玻璃暗色）
+        auto_theme_switch (bool): 是否根据时间自动切换主题
+        theme_switch_times (dict): 自动切换主题的时间配置，如 {"light": "06:00", "dark": "18:00"}
         is_admin_restricted (int): 是否限制管理员操作，0为不限制，1为限制
         rand (int): 排行榜显示人数，默认为20人
         if_send_pic (int): 是否发送图片，0为文字模式，1为图片模式（与Web Schema一致）
@@ -388,7 +390,9 @@ class PluginConfig:
         >>> config.detailed_logging_enabled = False  # 隐藏详细日志
     """
     def __init__(self):
-        self.theme = "default"  # 排行榜主题风格: default, liquid_glass
+        self.theme = "default"  # 排行榜主题风格: default, liquid_glass, liquid_glass_dark
+        self.auto_theme_switch = False  # 是否根据时间自动切换主题
+        self.theme_switch_times = {"light": "06:00", "dark": "18:00"}  # 浅色/深色主题切换时间
         self.is_admin_restricted = 0
         self.rand = 20
         self.if_send_pic = 1
@@ -405,6 +409,10 @@ class PluginConfig:
         
         # 屏蔽群聊列表
         self.blocked_groups = []
+        
+        # 发言里程碑推送配置
+        self.milestone_enabled = False
+        self.milestone_targets = [666, 1000, 2333, 5000, 6666, 10000, 23333]
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典
@@ -430,6 +438,9 @@ class PluginConfig:
         """
         return {
             "theme": self.theme,
+            "auto_theme_switch": self.auto_theme_switch,
+            "theme_switch_light_time": self.theme_switch_times.get("light", "06:00"),
+            "theme_switch_dark_time": self.theme_switch_times.get("dark", "18:00"),
             "is_admin_restricted": self.is_admin_restricted,
             "rand": self.rand,
             "if_send_pic": self.if_send_pic,
@@ -439,7 +450,9 @@ class PluginConfig:
             "timer_target_groups": self.timer_target_groups,
             "timer_rank_type": self.timer_rank_type,
             "blocked_users": self.blocked_users,
-            "blocked_groups": self.blocked_groups
+            "blocked_groups": self.blocked_groups,
+            "milestone_enabled": self.milestone_enabled,
+            "milestone_targets": self.milestone_targets
         }
     
     @classmethod
@@ -482,6 +495,19 @@ class PluginConfig:
         
         # 设置配置值
         config.theme = data.get("theme", "default")
+        config.auto_theme_switch = data.get("auto_theme_switch", False)
+        
+        # 兼容处理：从 theme_switch_times 字典或独立的 theme_switch_light_time/theme_switch_dark_time 字段读取
+        light_time = data.get("theme_switch_light_time", "")
+        dark_time = data.get("theme_switch_dark_time", "")
+        theme_times = data.get("theme_switch_times", {})
+        if isinstance(theme_times, dict):
+            light_time = theme_times.get("light") or light_time
+            dark_time = theme_times.get("dark") or dark_time
+        config.theme_switch_times = {
+            "light": light_time if light_time else "06:00",
+            "dark": dark_time if dark_time else "18:00"
+        }
         config.is_admin_restricted = data.get("is_admin_restricted", 0)
         config.rand = data.get("rand", 20)
         config.if_send_pic = if_send_pic
@@ -492,6 +518,8 @@ class PluginConfig:
         config.timer_rank_type = data.get("timer_rank_type", "daily")
         config.blocked_users = data.get("blocked_users", [])
         config.blocked_groups = data.get("blocked_groups", [])
+        config.milestone_enabled = data.get("milestone_enabled", False)
+        config.milestone_targets = data.get("milestone_targets", [666, 1000, 2333, 5000, 6666, 10000, 23333])
         
         return config
 
