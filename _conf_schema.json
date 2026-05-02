@@ -1,8 +1,26 @@
 {
+  "auto_theme_switch": {
+    "type": "bool",
+    "description": "自动主题切换",
+    "hint": "启用后根据时间自动切换排行榜主题（浅色/深色），会覆盖下方的手动主题设置",
+    "default": false
+  },
+  "theme_switch_light_time": {
+    "type": "string",
+    "description": "浅色主题开始时间",
+    "hint": "浅色主题开始时间，格式 HH:MM，例如 06:00",
+    "default": "06:00"
+  },
+  "theme_switch_dark_time": {
+    "type": "string",
+    "description": "深色主题开始时间",
+    "hint": "深色主题开始时间，格式 HH:MM，例如 18:00",
+    "default": "18:00"
+  },
   "theme": {
     "type": "string",
     "description": "排行榜主题风格",
-    "hint": "图片显示排行榜的主题风格",
+    "hint": "图片显示排行榜的主题风格（启用自动主题切换后此设置将被覆盖）",
     "default": "default",
     "options": [
       "default",
@@ -14,8 +32,7 @@
     "type": "bool",
     "description": "是否开启详细日志记录",
     "hint": "关闭后将隐藏'记录消息统计'等详细日志，只保留重要的系统日志和错误日志",
-    "default": true,
-    "obvious_hint": true
+    "default": true
   },
   "rand": {
     "type": "int",
@@ -36,15 +53,13 @@
     "options": [
       "文字",
       "图片"
-    ],
-    "obvious_hint": true
+    ]
   },
   "timer_enabled": {
     "type": "bool",
     "description": "是否启用定时推送排行榜功能",
     "hint": "开启后将在指定时间自动向指定群组推送排行榜",
-    "default": false,
-    "obvious_hint": false
+    "default": false
   },
   "timer_push_time": {
     "type": "string",
@@ -79,33 +94,12 @@
     "type": "list",
     "description": "屏蔽用户列表",
     "hint": "屏蔽指定用户，使其不显示在发言榜上且不统计其发言数据。请输入完整的QQ号码。",
-    "default": [],
-    "obvious_hint": true
+    "default": []
   },
   "blocked_groups": {
     "type": "list",
     "description": "屏蔽群聊列表",
     "hint": "屏蔽指定群聊，使其不统计发言数据且无法使用排行榜指令。请输入完整的群号码。",
-    "default": [],
-    "obvious_hint": true
-  },
-  "auto_theme_switch": {
-    "type": "bool",
-    "description": "自动主题切换",
-    "hint": "启用后根据时间自动切换排行榜主题（浅色/深色）",
-    "default": false,
-    "obvious_hint": true
-  },
-  "theme_switch_light_time": {
-    "type": "string",
-    "description": "浅色主题开始时间",
-    "hint": "浅色主题开始时间，格式 HH:MM，例如 06:00",
-    "default": "06:00"
-  },
-  "theme_switch_dark_time": {
-    "type": "string",
-    "description": "深色主题开始时间",
-    "hint": "深色主题开始时间，格式 HH:MM，例如 18:00",
-    "default": "18:00"
+    "default": []
   }
 }
