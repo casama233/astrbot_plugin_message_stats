@@ -29,16 +29,16 @@ class GroupDataStore:
     
     专门负责群组数据（JSON文件）的增删改查和修复。
     
-    优化：添加延迟批量写入机制，避免每次消息都写盘。
-    - 数据修改先缓存在内存中
-    - 每30秒或积累10次修改后批量写入一次
-    - 大幅减少磁盘写入量
+    优化：延迟批量写入 + 紧凑 JSON 格式。
+    - 数据修改先缓存在内存 _dirty_cache 中
+    - 积累 _FLUSH_THRESHOLD（10）次修改后批量写入一次
+    - 使用紧凑格式（indent=None）减少文件体积约 50%
+    - get_group_data() 读的是 data_cache（内存），不受延迟写入影响
+    - 插件关闭时通过 flush_all() 确保数据落盘
     """
     
-    # 批量写入间隔（秒）
-    _BATCH_WRITE_INTERVAL = 30
-    # 最大积累修改次数
-    _MAX_DIRTY_COUNT = 10
+    # 积累多少次修改后触发一次写盘
+    _FLUSH_THRESHOLD = 10
     
     def __init__(self, groups_dir: Path, logger=None):
         self.groups_dir = groups_dir
@@ -50,7 +50,9 @@ class GroupDataStore:
         self._dirty_count = 0
         # 批量写入任务
         self._batch_write_task: Optional[asyncio.Task] = None
-        # 停止事件
+        # 写盘触发事件（积累够 _FLUSH_THRESHOLD 次时 set）
+        self._write_trigger = asyncio.Event()
+        # 停止事件（插件关闭时 set）
         self._stop_event = asyncio.Event()
         # 目录创建延迟到首次使用时异步执行
     
@@ -109,7 +111,9 @@ class GroupDataStore:
     async def save_group_data(self, group_id: str, users: List[UserData], group_name: str = None) -> bool:
         """保存群组数据（延迟批量写入）
         
-        数据先缓存在内存中，定期批量写入磁盘，大幅减少磁盘写入量。
+        数据先缓存在内存中，积累 _FLUSH_THRESHOLD 次修改后批量写入磁盘。
+        get_group_data() 读的是 data_cache（内存），不受延迟写入影响，数据实时。
+        插件关闭时通过 flush_all() 确保数据落盘。
         
         Args:
             group_id: 群组ID
@@ -123,6 +127,10 @@ class GroupDataStore:
         self._dirty_cache[group_id] = (users, group_name)
         self._dirty_count += 1
         
+        # 积累够阈值，触发写盘
+        if self._dirty_count >= self._FLUSH_THRESHOLD:
+            self._write_trigger.set()
+        
         # 启动批量写入任务（如果尚未启动）
         if self._batch_write_task is None or self._batch_write_task.done():
             self._batch_write_task = asyncio.create_task(self._batch_write_loop())
@@ -130,29 +138,32 @@ class GroupDataStore:
         return True
     
     async def _batch_write_loop(self):
-        """批量写入循环：积累修改后一次性写入磁盘"""
+        """批量写入循环：等待 _write_trigger 事件触发后写盘，零CPU空转"""
         try:
             while self._dirty_cache:
-                # 等待一段时间或积累足够多的修改
-                try:
-                    await asyncio.wait_for(
-                        self._stop_event.wait(),
-                        timeout=self._BATCH_WRITE_INTERVAL
-                    )
-                    # 收到停止信号，立即写入所有脏数据
+                # 等待触发事件（积累够 _FLUSH_THRESHOLD 次）或停止信号
+                # 使用 wait_for 同时监听两个事件
+                write_task = asyncio.create_task(self._write_trigger.wait())
+                stop_task = asyncio.create_task(self._stop_event.wait())
+                
+                done, pending = await asyncio.wait(
+                    [write_task, stop_task],
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+                
+                # 取消未完成的任务
+                for task in pending:
+                    task.cancel()
+                
+                if self._stop_event.is_set():
+                    # 收到停止信号，写盘后退出
                     break
-                except asyncio.TimeoutError:
-                    pass
                 
-                # 检查是否积累足够多的修改
-                if self._dirty_count < self._MAX_DIRTY_COUNT and not self._stop_event.is_set():
-                    continue
-                
-                # 执行批量写入
+                # 触发事件已 set，清除并写盘
+                self._write_trigger.clear()
                 await self._flush_dirty_cache()
                 
         except asyncio.CancelledError:
-            # 任务被取消时，尝试写入剩余脏数据
             await self._flush_dirty_cache()
             raise
     
@@ -192,7 +203,7 @@ class GroupDataStore:
             except (json.JSONDecodeError, IOError):
                 pass
         
-        # 准备数据（不使用 indent=2 减少文件体积）
+        # 准备数据（使用紧凑格式减少文件体积）
         data = {
             'group_id': group_id,
             'last_updated': datetime.now().isoformat(),
