@@ -149,7 +149,7 @@ astrbot_plugin_message_stats/
 
 ### Telegram 用户注意事项
 - Telegram 群组ID为负数（如 `-1001234567890`），插件已完全兼容
-- 定时推送目标群组支持填写 `unified_msg_origin` 格式（如 `Amydd:GroupMessage:1081839722`）
+- 定时推送目标群组支持填写 `unified_msg_origin` 格式（如 `BotName:GroupMessage:123456789`）
 - 支持统计贴纸、图片等非文本消息
 
 ## 📝 更新日志
