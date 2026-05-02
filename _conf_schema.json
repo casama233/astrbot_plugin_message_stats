@@ -90,6 +90,18 @@
     ],
     "invisible": false
   },
+  "milestone_enabled": {
+    "type": "bool",
+    "description": "发言里程碑推送",
+    "hint": "启用后当用户发言达到里程碑次数时自动推送排行榜",
+    "default": false
+  },
+  "milestone_targets": {
+    "type": "list",
+    "description": "里程碑次数列表",
+    "hint": "触发推送的发言次数里程碑，如 [666, 1000, 5000, 10000]",
+    "default": [666, 1000, 5000, 10000]
+  },
   "blocked_users": {
     "type": "list",
     "description": "屏蔽用户列表",

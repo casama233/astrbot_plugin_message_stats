@@ -409,6 +409,10 @@ class PluginConfig:
         
         # 屏蔽群聊列表
         self.blocked_groups = []
+        
+        # 发言里程碑推送配置
+        self.milestone_enabled = False
+        self.milestone_targets = [666, 1000, 5000, 10000]
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典
@@ -445,7 +449,9 @@ class PluginConfig:
             "timer_target_groups": self.timer_target_groups,
             "timer_rank_type": self.timer_rank_type,
             "blocked_users": self.blocked_users,
-            "blocked_groups": self.blocked_groups
+            "blocked_groups": self.blocked_groups,
+            "milestone_enabled": self.milestone_enabled,
+            "milestone_targets": self.milestone_targets
         }
     
     @classmethod
@@ -500,6 +506,8 @@ class PluginConfig:
         config.timer_rank_type = data.get("timer_rank_type", "daily")
         config.blocked_users = data.get("blocked_users", [])
         config.blocked_groups = data.get("blocked_groups", [])
+        config.milestone_enabled = data.get("milestone_enabled", False)
+        config.milestone_targets = data.get("milestone_targets", [666, 1000, 5000, 10000])
         
         return config
 

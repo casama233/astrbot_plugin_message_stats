@@ -330,8 +330,8 @@ class DataManager:
         else:
             self.logger.error(f"群组 {group_id} 数据保存失败")
     
-    @safe_data_operation(default_return=False)
-    async def update_user_message(self, group_id: str, user_id: str, nickname: str) -> bool:
+    @safe_data_operation(default_return=(False, 0))
+    async def update_user_message(self, group_id: str, user_id: str, nickname: str) -> tuple:
         """更新用户消息统计
         
         异步更新指定用户在群组中的消息统计，包括新增用户和更新现有用户。
@@ -343,7 +343,7 @@ class DataManager:
             nickname (str): 用户昵称
             
         Returns:
-            bool: 更新是否成功
+            tuple: (bool, int) - (更新是否成功, 更新后的总发言数)
             
         Raises:
             ValueError: 当参数格式不正确时
@@ -404,7 +404,11 @@ class DataManager:
             
             # 保存更新后的数据
             await self.save_group_data(group_id, updated_users)
-            return True
+            
+            # 返回更新后的总发言数
+            updated_user = users_dict.get(user_id)
+            message_count = updated_user.message_count if updated_user else 0
+            return True, message_count
     
     @safe_data_operation(default_return=False)
     async def clear_group_data(self, group_id: str) -> bool:
