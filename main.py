@@ -353,12 +353,15 @@ class MessageStatsPlugin(Star):
         self.plugin_config = self._convert_to_plugin_config()
         
         # 注册配置项到AstrBot Web面板（确保新配置项在Web面板中可见）
+        # 注意：namespace 必须与插件自己的 ConfigManager 使用的文件名一致
+        # 插件 ConfigManager 读取的是 astrbot_plugin_message_stats_config.json
+        # 所以这里使用 "astrbot_plugin_message_stats_config" 作为 namespace
         try:
-            put_config("astrbot_plugin_message_stats", "自动主题切换", "auto_theme_switch", 
+            put_config("astrbot_plugin_message_stats_config", "自动主题切换", "auto_theme_switch", 
                       self.plugin_config.auto_theme_switch, "启用后根据时间自动切换排行榜主题")
-            put_config("astrbot_plugin_message_stats", "浅色主题开始时间", "theme_switch_light_time", 
+            put_config("astrbot_plugin_message_stats_config", "浅色主题开始时间", "theme_switch_light_time", 
                       self.plugin_config.theme_switch_times.get("light", "06:00"), "浅色主题开始时间，格式 HH:MM")
-            put_config("astrbot_plugin_message_stats", "深色主题开始时间", "theme_switch_dark_time", 
+            put_config("astrbot_plugin_message_stats_config", "深色主题开始时间", "theme_switch_dark_time", 
                       self.plugin_config.theme_switch_times.get("dark", "18:00"), "深色主题开始时间，格式 HH:MM")
         except Exception as e:
             self.logger.debug(f"注册Web面板配置项失败(不影响使用): {e}")
