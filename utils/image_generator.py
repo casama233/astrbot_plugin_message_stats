@@ -127,8 +127,15 @@ class ImageGenerator:
         self.jinja_env = None
     
     def _update_template_path(self):
-        """根据主题配置更新模板路径"""
+        """根据主题配置更新模板路径（支持自动根据时间切换主题）"""
         theme = getattr(self.config, 'theme', 'default')
+        auto_switch = getattr(self.config, 'auto_theme_switch', False)
+        
+        if auto_switch:
+            # 自动根据时间切换主题
+            theme = self._get_auto_theme()
+            self.logger.info(f"自动主题切换已启用，当前时间匹配主题: {theme}")
+        
         template_map = {
             'default': 'rank_template.html',
             'liquid_glass': 'rank_template_liquid_glass.html',
@@ -137,6 +144,41 @@ class ImageGenerator:
         template_file = template_map.get(theme, 'rank_template.html')
         self.template_path = self._templates_dir / template_file
         self.logger.info(f"使用排行榜主题: {theme}, 模板: {template_file}")
+    
+    def _get_auto_theme(self) -> str:
+        """根据当前时间自动选择合适的主题
+        
+        根据 auto_theme_switch 配置中的 light/dark 切换时间，
+        判断当前应该使用浅色主题还是深色主题。
+        
+        Returns:
+            str: 主题名称，'default'（浅色）或 'liquid_glass_dark'（深色）
+        """
+        try:
+            switch_times = getattr(self.config, 'theme_switch_times', {"light": "06:00", "dark": "18:00"})
+            now = datetime.now()
+            current_minutes = now.hour * 60 + now.minute
+            
+            # 解析浅色主题开始时间
+            light_time_str = switch_times.get("light", "06:00")
+            light_h, light_m = map(int, light_time_str.split(':'))
+            light_minutes = light_h * 60 + light_m
+            
+            # 解析深色主题开始时间
+            dark_time_str = switch_times.get("dark", "18:00")
+            dark_h, dark_m = map(int, dark_time_str.split(':'))
+            dark_minutes = dark_h * 60 + dark_m
+            
+            # 判断当前时间段
+            if light_minutes <= current_minutes < dark_minutes:
+                # 浅色时间段：使用 default 主题
+                return 'default'
+            else:
+                # 深色时间段：使用 liquid_glass_dark 主题
+                return 'liquid_glass_dark'
+        except (ValueError, AttributeError, KeyError, TypeError) as e:
+            self.logger.warning(f"自动主题切换时间解析失败，使用默认主题: {e}")
+            return 'default'
     
 
     
