@@ -409,6 +409,16 @@ class PluginConfig:
         # 发言里程碑推送配置
         self.milestone_enabled = False
         self.milestone_targets = [666, 1000, 2333, 5000, 6666, 10000, 23333]
+        
+        # LLM 头衔分析配置
+        self.llm_enabled = False
+        self.llm_api_base_url = "http://localhost:6185"
+        self.llm_api_key = ""
+        self.llm_model = ""
+        self.llm_timeout = 60
+        self.llm_max_retries = 2
+        self.llm_system_prompt = ""
+        self.llm_user_prompt_template = ""
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典
@@ -448,7 +458,15 @@ class PluginConfig:
             "blocked_users": self.blocked_users,
             "blocked_groups": self.blocked_groups,
             "milestone_enabled": self.milestone_enabled,
-            "milestone_targets": self.milestone_targets
+            "milestone_targets": self.milestone_targets,
+            "llm_enabled": self.llm_enabled,
+            "llm_api_base_url": self.llm_api_base_url,
+            "llm_api_key": self.llm_api_key,
+            "llm_model": self.llm_model,
+            "llm_timeout": self.llm_timeout,
+            "llm_max_retries": self.llm_max_retries,
+            "llm_system_prompt": self.llm_system_prompt,
+            "llm_user_prompt_template": self.llm_user_prompt_template
         }
     
     @classmethod
@@ -516,6 +534,16 @@ class PluginConfig:
         config.blocked_groups = data.get("blocked_groups", [])
         config.milestone_enabled = data.get("milestone_enabled", False)
         config.milestone_targets = data.get("milestone_targets", [666, 1000, 2333, 5000, 6666, 10000, 23333])
+        
+        # LLM 头衔分析配置
+        config.llm_enabled = data.get("llm_enabled", False)
+        config.llm_api_base_url = data.get("llm_api_base_url", "http://localhost:6185")
+        config.llm_api_key = data.get("llm_api_key", "")
+        config.llm_model = data.get("llm_model", "")
+        config.llm_timeout = data.get("llm_timeout", 60)
+        config.llm_max_retries = data.get("llm_max_retries", 2)
+        config.llm_system_prompt = data.get("llm_system_prompt", "")
+        config.llm_user_prompt_template = data.get("llm_user_prompt_template", "")
         
         return config
 

@@ -34,6 +34,7 @@ from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from .models import RankType, UserData, GroupInfo
 from .data_manager import DataManager
 from .image_generator import ImageGenerator
+from .llm_analyzer import LLMAnalyzer, LLMConfig
 from .date_utils import get_current_date, get_week_start, get_month_start
 from .exception_handlers import safe_timer_operation, safe_generation, safe_data_operation
 
@@ -639,6 +640,39 @@ class TimerManager:
         
         # 定时推送前强制刷新昵称缓存，确保显示最新昵称
         await self._refresh_nickname_cache_for_timer_push(group_id, group_data)
+        
+        # 如果启用了 LLM 头衔分析，先调用 LLM 生成头衔
+        if config.llm_enabled:
+            try:
+                llm_cfg = LLMConfig.from_dict({
+                    "llm_enabled": True,
+                    "llm_api_base_url": getattr(config, 'llm_api_base_url', 'http://localhost:6185'),
+                    "llm_api_key": getattr(config, 'llm_api_key', ''),
+                    "llm_model": getattr(config, 'llm_model', ''),
+                    "llm_timeout": getattr(config, 'llm_timeout', 60),
+                    "llm_max_retries": getattr(config, 'llm_max_retries', 2),
+                    "llm_system_prompt": getattr(config, 'llm_system_prompt', ''),
+                })
+                llm_analyzer = LLMAnalyzer(llm_cfg)
+                
+                # 获取群组名称用于提示词
+                grp_name = await self._get_group_name(group_id)
+                titles = await llm_analyzer.analyze_users(group_data, grp_name)
+                
+                if titles:
+                    self.logger.info(f"✅ LLM 头衔生成成功: 为 {len(titles)} 个用户生成了头衔")
+                    # 将头衔设置到用户数据的 display_title 属性
+                    for user in group_data:
+                        if user.user_id in titles:
+                            user.display_title = titles[user.user_id]
+                else:
+                    self.logger.warning("⚠️ LLM 头衔生成结果为空，将使用不带头衔的排行榜")
+                
+                # 清理 LLM 分析器资源
+                await llm_analyzer.cleanup()
+            except Exception as e:
+                self.logger.error(f"❌ LLM 头衔生成异常: {e}", exc_info=True)
+                self.logger.info("将使用不带头衔的排行榜继续推送")
         
         # 根据排行榜类型筛选数据
         # 定时推送强制使用今日排行榜

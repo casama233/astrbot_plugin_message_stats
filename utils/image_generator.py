@@ -662,9 +662,12 @@ class ImageGenerator:
             
             # 使用时间段内的发言数
             user_messages = getattr(user, 'display_total', user.message_count)
+            # 获取 LLM 生成的头衔（从 user_data 的 display_title 属性获取）
+            user_title = getattr(user, 'display_title', None) or getattr(user, 'title', None)
             user_items.append({
                 'rank': i + 1,
                 'nickname': user.nickname,
+                'title': user_title if user_title else None,
                 'avatar_url': self._get_avatar_url(user.user_id, "qq"),
                 'total': user_messages,
                 'percentage': (user_messages / total_messages * 100) if total_messages > 0 else 0,

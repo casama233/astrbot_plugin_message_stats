@@ -198,6 +198,15 @@
             flex-direction: column;
         }
 
+        .user-title {
+            font-size: 16px;
+            color: #8B5CF6;
+            font-weight: 600;
+            margin-bottom: 6px;
+            font-style: italic;
+            letter-spacing: 0.5px;
+        }
+
         .nickname {
             font-size: 24px;
             color: #1F2937;
@@ -347,6 +356,9 @@
                     <div class="info">
                         <div class="name-date">
                             <div class="nickname">{{ item.nickname }}</div>
+                            {% if item.title %}
+                            <div class="user-title">「{{ item.title }}」</div>
+                            {% endif %}
                             <div class="date">最近发言: {{ item.last_date }}</div>
                         </div>
                         <div class="stats">
