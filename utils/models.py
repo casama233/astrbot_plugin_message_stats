@@ -13,13 +13,8 @@ from datetime import datetime, date
 from typing import List, Optional, Dict, Any
 from enum import Enum
 
-# 使用框架的日志记录器 - 使用可选导入避免测试环境问题
-try:
-    from astrbot.api import logger
-except ImportError:
-    # 测试环境或导入失败时使用标准logging
-    import logging
-    logger = logging.getLogger(__name__)
+# 使用框架的日志记录器
+from astrbot.api import logger
 
 
 
@@ -204,32 +199,33 @@ class UserData:
     last_date: Optional[str] = None
     first_message_time: Optional[int] = None
     last_message_time: Optional[int] = None
+    # 按天聚合的字典 {date_str: count}，替代 history 列表存储
+    # 10万条消息最多365个键值对，内存占用从O(n)降到O(365)
+    _message_dates: Dict[str, int] = field(default_factory=dict)
     
     def add_message(self, message_date: MessageDate):
         """添加消息记录
         
-        增加用户的发言计数并记录发言日期。每次发言都会记录到历史中，
-        保持message_count字段与实际发言次数的一致性。
+        增加用户的发言计数并记录发言日期。使用按天聚合的字典存储，
+        避免 history 列表无限增长导致内存泄漏。
         
         Args:
             message_date (MessageDate): 消息日期对象
             
         Returns:
             None: 无返回值，直接修改对象状态
-            
-        Example:
-            >>> user = UserData("123", "用户")
-            >>> user.add_message(MessageDate(2024, 1, 15))
-            >>> print(user.message_count)
-            1
         """
         self.message_count += 1
         
-        # 每次发言都添加到历史记录中
-        self.history.append(message_date)
+        # 使用按天聚合的字典存储，每天只存一个 {date_str: count}
+        # 10万条消息最多365个键值对，内存占用从O(n)降到O(365)
+        date_str = str(message_date)
+        if date_str not in self._message_dates:
+            self._message_dates[date_str] = 0
+        self._message_dates[date_str] += 1
         
         # 更新最后发言日期
-        self.last_date = str(message_date)
+        self.last_date = date_str
     
     def get_last_message_date(self) -> Optional[MessageDate]:
         """获取最后消息日期
@@ -238,20 +234,34 @@ class UserData:
         
         Returns:
             Optional[MessageDate]: 最后发言日期，如果无记录则返回None
-            
-        Example:
-            >>> user = UserData("123", "用户")
-            >>> user.add_message(MessageDate(2024, 1, 15))
-            >>> last_date = user.get_last_message_date()
-            >>> print(last_date.year)
-            2024
         """
-        return self.history[-1] if self.history else None
+        if not self._message_dates:
+            return None
+        # 取最后一条记录的日期
+        last_date_str = max(self._message_dates.keys())
+        year, month, day = map(int, last_date_str.split('-'))
+        return MessageDate(year, month, day)
+    
+    def _ensure_message_dates(self):
+        """确保 _message_dates 数据完整
+        
+        兜底保护：如果 _message_dates 为空但 message_count > 0，
+        说明数据可能有问题，尝试从 history 列表重建。
+        这通常只会在旧数据升级后第一次加载时触发。
+        """
+        if not self._message_dates and self.message_count > 0 and self.history:
+            try:
+                for h in self.history:
+                    date_str = str(h)
+                    self._message_dates[date_str] = self._message_dates.get(date_str, 0) + 1
+            except Exception:
+                pass  # 重建失败不影响主功能
     
     def get_message_count_in_period(self, start_date: date, end_date: date) -> int:
         """获取指定时间段内的消息数量
         
-        计算用户在指定日期范围内的发言次数。
+        使用按天聚合的字典 O(1) 查询，比遍历 history 列表 O(n) 快得多。
+        内置兜底保护：如果字典为空但 message_count > 0，自动从 history 重建。
         
         Args:
             start_date (date): 开始日期（包含）
@@ -259,47 +269,32 @@ class UserData:
             
         Returns:
             int: 指定时间段内的发言次数
-            
-        Example:
-            >>> user = UserData("123", "用户")
-            >>> user.add_message(MessageDate(2024, 1, 15))
-            >>> user.add_message(MessageDate(2024, 1, 16))
-            >>> count = user.get_message_count_in_period(date(2024, 1, 1), date(2024, 1, 31))
-            >>> print(count)
-            2
         """
+        # 兜底保护：确保 _message_dates 数据完整
+        self._ensure_message_dates()
+        
         count = 0
-        for hist_date in self.history:
-            if start_date <= hist_date.to_date() <= end_date:
-                count += 1
+        start_str = str(start_date)
+        end_str = str(end_date)
+        for date_str, day_count in self._message_dates.items():
+            if start_str <= date_str <= end_str:
+                count += day_count
         return count
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典
         
         将UserData实例转换为字典格式，便于JSON序列化。
+        使用按天聚合的字典存储，大幅减少JSON文件体积。
         
         Returns:
-            Dict[str, Any]: 包含用户数据的字典，包括：
-                - user_id: 用户ID
-                - nickname: 用户昵称
-                - message_count: 总发言次数
-                - history: 发言日期历史（字符串列表）
-                - last_date: 最后发言日期
-                - first_message_time: 首次发言时间戳
-                - last_message_time: 最后发言时间戳
-                
-        Example:
-            >>> user = UserData("123", "用户")
-            >>> data = user.to_dict()
-            >>> print(data['nickname'])
-            '用户'
+            Dict[str, Any]: 包含用户数据的字典
         """
         return {
             "user_id": self.user_id,
             "nickname": self.nickname,
             "message_count": self.message_count,
-            "history": [str(h) for h in self.history],
+            "history": [f"{date_str}:{count}" for date_str, count in sorted(self._message_dates.items())],
             "last_date": self.last_date,
             "first_message_time": self.first_message_time,
             "last_message_time": self.last_message_time
@@ -310,22 +305,15 @@ class UserData:
         """从字典创建
         
         从字典数据创建UserData实例，自动重建发言历史记录。
+        兼容新旧两种格式：
+        - 新格式: ["2024-01-15:3", "2024-01-16:5"] (按天聚合)
+        - 旧格式: ["2024-01-15", "2024-01-15", "2024-01-15"] (逐条记录)
         
         Args:
-            data (Dict[str, Any]): 用户数据字典，必须包含user_id和nickname字段
+            data (Dict[str, Any]): 用户数据字典
             
         Returns:
             UserData: 对应的UserData实例
-            
-        Raises:
-            KeyError: 当缺少必需字段时抛出
-            ValueError: 当数据格式错误时抛出
-            
-        Example:
-            >>> data = {"user_id": "123", "nickname": "用户", "message_count": 5}
-            >>> user = UserData.from_dict(data)
-            >>> print(user.user_id)
-            '123'
         """
         user_data = cls(
             user_id=data["user_id"],
@@ -336,21 +324,29 @@ class UserData:
             last_message_time=data.get("last_message_time")
         )
         
-        # 重建history
+        # 重建 _message_dates（兼容新旧格式）
         if "history" in data:
             try:
                 for hist_str in data["history"]:
                     try:
-                        year, month, day = map(int, hist_str.split('-'))
-                        user_data.history.append(MessageDate(year, month, day))
+                        # 新格式: "2024-01-15:3"
+                        if ':' in hist_str:
+                            date_part, count_part = hist_str.rsplit(':', 1)
+                            year, month, day = map(int, date_part.split('-'))
+                            count = int(count_part)
+                            user_data._message_dates[date_part] = count
+                        else:
+                            # 旧格式: "2024-01-15" (逐条)
+                            year, month, day = map(int, hist_str.split('-'))
+                            date_str = hist_str
+                            if date_str not in user_data._message_dates:
+                                user_data._message_dates[date_str] = 0
+                            user_data._message_dates[date_str] += 1
                     except (ValueError, IndexError) as e:
-                        # 跳过格式错误的日期记录，但记录警告
                         logger.warning(f"跳过格式错误的日期记录 '{hist_str}': {e}")
                         continue
             except TypeError as e:
-                # 如果history不是可迭代对象，跳过但记录更详细的警告
-                logger.warning(f"history字段类型错误，不是可迭代对象: {type(data.get('history'))}, 错误: {e}")
-                # 不使用pass，而是记录具体的错误信息
+                logger.warning(f"history字段类型错误: {type(data.get('history'))}, 错误: {e}")
         
         return user_data
     

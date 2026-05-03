@@ -551,34 +551,15 @@ class ImageGenerator:
                     return template.render(**template_data)
             else:
                 # Jinja2不可用时，使用纯占位符回退模板
-                fallback_template = await self._get_fallback_template()
-                return self._render_fallback_template(fallback_template, template_data, user_items)
-        except ValueError as e:
-            self.logger.error(f"HTML模板渲染失败，模板数据值错误: {e}")
-            # 使用安全的备用方法
-            fallback_template = await self._get_fallback_template()
-            return self._render_fallback_template(fallback_template, template_data, user_items)
-        except TypeError as e:
-            self.logger.error(f"HTML模板渲染失败，模板数据类型错误: {e}")
-            # 使用安全的备用方法
-            fallback_template = await self._get_fallback_template()
-            return self._render_fallback_template(fallback_template, template_data, user_items)
-        except KeyError as e:
-            self.logger.error(f"HTML模板渲染失败，模板键错误: {e}")
-            # 使用安全的备用方法
-            fallback_template = await self._get_fallback_template()
-            return self._render_fallback_template(fallback_template, template_data, user_items)
-        except PermissionError as e:
-            self.logger.error(f"HTML模板渲染失败，权限错误: {e}")
-            # 使用安全的备用方法
-            fallback_template = await self._get_fallback_template()
-            return self._render_fallback_template(fallback_template, template_data, user_items)
-        except UnicodeDecodeError as e:
-            # 捕获模板文件编码错误，如UTF-8解码失败、字符编码问题等
-            self.logger.error(f"HTML模板渲染失败，编码错误: {e}")
-            # 使用安全的备用方法
-            fallback_template = await self._get_fallback_template()
-            return self._render_fallback_template(fallback_template, template_data, user_items)
+                return await self._render_fallback(template_data, user_items)
+        except (ValueError, TypeError, KeyError, PermissionError, UnicodeDecodeError) as e:
+            self.logger.error(f"HTML模板渲染失败({type(e).__name__}): {e}")
+            return await self._render_fallback(template_data, user_items)
+    
+    async def _render_fallback(self, template_data: Dict[str, Any], user_items: List[Dict[str, Any]]) -> str:
+        """统一的回退渲染方法"""
+        fallback_template = await self._get_fallback_template()
+        return self._render_fallback_template(fallback_template, template_data, user_items)
     
     def _render_fallback_template(self, template_content: str, template_data: Dict[str, Any], user_items: List[Dict[str, Any]]) -> str:
         """回退模板渲染方法（安全版本）
@@ -605,6 +586,19 @@ class ImageGenerator:
         
         return safe_content
     
+    # 最简单的空数据回退HTML常量
+    _EMPTY_FALLBACK_HTML = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>发言排行榜</title>
+</head>
+<body>
+    <h1>发言排行榜</h1>
+    <p>暂无数据</p>
+</body>
+</html>"""
+
     async def _generate_empty_html(self, group_info: GroupInfo, title: str) -> str:
         """生成空数据HTML（优化版本）"""
         # 尝试从缓存获取空数据模板
@@ -645,77 +639,9 @@ class ImageGenerator:
                     else:
                         safe_content = safe_content.replace('{{' + key + '}}', str(value))
                 return safe_content
-        except ValueError as e:
-            self.logger.error(f"空数据HTML模板渲染失败，模板数据值错误: {e}")
-            # 回退到最简单的HTML
-            return f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <title>发言排行榜</title>
-</head>
-<body>
-    <h1>发言排行榜</h1>
-    <p>暂无数据</p>
-</body>
-</html>"""
-        except TypeError as e:
-            self.logger.error(f"空数据HTML模板渲染失败，模板数据类型错误: {e}")
-            # 回退到最简单的HTML
-            return f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <title>发言排行榜</title>
-</head>
-<body>
-    <h1>发言排行榜</h1>
-    <p>暂无数据</p>
-</body>
-</html>"""
-        except KeyError as e:
-            self.logger.error(f"空数据HTML模板渲染失败，模板键错误: {e}")
-            # 回退到最简单的HTML
-            return f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <title>发言排行榜</title>
-</head>
-<body>
-    <h1>发言排行榜</h1>
-    <p>暂无数据</p>
-</body>
-</html>"""
-        except PermissionError as e:
-            self.logger.error(f"空数据HTML模板渲染失败，权限错误: {e}")
-            # 回退到最简单的HTML
-            return f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <title>发言排行榜</title>
-</head>
-<body>
-    <h1>发言排行榜</h1>
-    <p>暂无数据</p>
-</body>
-</html>"""
-        except UnicodeDecodeError as e:
-            # 捕获空数据模板编码错误，如UTF-8解码失败、字符编码问题等
-            self.logger.error(f"空数据HTML模板渲染失败，编码错误: {e}")
-            # 回退到最简单的HTML
-            return f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <title>发言排行榜</title>
-</head>
-<body>
-    <h1>发言排行榜</h1>
-    <p>暂无数据</p>
-</body>
-</html>"""
+        except (ValueError, TypeError, KeyError, PermissionError, UnicodeDecodeError) as e:
+            self.logger.error(f"空数据HTML模板渲染失败({type(e).__name__}): {e}")
+            return self._EMPTY_FALLBACK_HTML
     
     async def _get_empty_template(self) -> str:
         """获取空数据模板（简化版本）"""

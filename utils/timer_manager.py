@@ -156,6 +156,8 @@ class TimerManager:
     _global_execution_lock: Optional[asyncio.Lock] = None
     _global_is_executing: bool = False
     _global_next_push_time: Optional[datetime] = None
+    _global_instance_id: int = 0  # 全局实例计数器，用于检测重复实例
+    _global_active_task_id: Optional[int] = None  # 当前活跃的定时任务实例ID
     
     
     def __init__(self, data_manager: DataManager, image_generator: ImageGenerator, context=None, group_unified_msg_origins: Dict[str, str] = None):
@@ -184,6 +186,11 @@ class TimerManager:
         # 初始化类级别的全局锁（只在第一个实例时创建）
         if TimerManager._global_execution_lock is None:
             TimerManager._global_execution_lock = asyncio.Lock()
+        
+        # 分配唯一的实例ID
+        TimerManager._global_instance_id += 1
+        self._instance_id = TimerManager._global_instance_id
+        self.logger.info(f"定时任务管理器实例 #{self._instance_id} 已创建")
         
         # 实例级别的锁（用于非关键操作）
         self._execution_lock = asyncio.Lock()
@@ -369,8 +376,17 @@ class TimerManager:
         Args:
             config: 插件配置对象
         """
+        # 注册当前实例为活跃任务
+        TimerManager._global_active_task_id = self._instance_id
+        self.logger.info(f"定时任务循环 #{self._instance_id} 已启动")
+        
         try:
             while not self._stop_event.is_set():
+                # 检查是否为当前活跃的实例，如果不是则自动退出
+                if TimerManager._global_active_task_id is not None and TimerManager._global_active_task_id != self._instance_id:
+                    self.logger.info(f"检测到更新的实例 #{TimerManager._global_active_task_id} 已启动，实例 #{self._instance_id} 自动退出")
+                    break
+                
                 if self.status == TimerTaskStatus.PAUSED:
                     # 暂停状态，等待恢复
                     await asyncio.sleep(60)  # 每分钟检查一次
@@ -400,6 +416,11 @@ class TimerManager:
                             self.logger.debug("全局推送时间已被更新，跳过本次执行")
                             continue
                         
+                        # 再次检查是否为活跃实例（防止在等待锁期间被新实例取代）
+                        if TimerManager._global_active_task_id is not None and TimerManager._global_active_task_id != self._instance_id:
+                            self.logger.info(f"锁内检查: 实例 #{self._instance_id} 已被取代，跳过执行")
+                            break
+                        
                         # 立即更新全局和实例的下次推送时间
                         next_time = self._calculate_next_push_time(config.timer_push_time)
                         self.next_push_time = next_time
@@ -408,12 +429,12 @@ class TimerManager:
                     
                     try:
                         # 执行推送任务
-                        self.logger.info("开始执行定时推送任务")
+                        self.logger.info(f"实例 #{self._instance_id} 开始执行定时推送任务")
                         success = await self._execute_push_task(config)
                         if success:
-                            self.logger.info("✅ 定时推送任务执行成功")
+                            self.logger.info(f"✅ 实例 #{self._instance_id} 定时推送任务执行成功")
                         else:
-                            self.logger.error("❌ 定时推送任务执行失败")
+                            self.logger.error(f"❌ 实例 #{self._instance_id} 定时推送任务执行失败")
                         
                         self.logger.info(f"下次推送时间: {self.next_push_time}")
                     finally:
@@ -424,17 +445,30 @@ class TimerManager:
                 await asyncio.sleep(60)  # 每分钟检查一次
                 
         except asyncio.CancelledError:
-            self.logger.info("定时任务被取消")
+            self.logger.info(f"实例 #{self._instance_id} 定时任务被取消")
             TimerManager._global_is_executing = False
         except (OSError, IOError, RuntimeError, ValueError) as e:
-            self.logger.error(f"定时任务循环异常: {e}")
+            self.logger.error(f"实例 #{self._instance_id} 定时任务循环异常: {e}")
             self.status = TimerTaskStatus.ERROR
             TimerManager._global_is_executing = False
-            # 5分钟后重试
+            # 限制重试次数，防止无限递归导致内存泄漏
+            retry_count = getattr(self, '_timer_retry_count', 0)
+            if retry_count >= 3:
+                self.logger.critical(f"实例 #{self._instance_id} 定时任务已重试 {retry_count} 次仍失败，停止重试")
+                return
+            self._timer_retry_count = retry_count + 1
+            self.logger.info(f"实例 #{self._instance_id} 将在5分钟后重试 (第{self._timer_retry_count}次)")
             await asyncio.sleep(300)
             if not self._stop_event.is_set():
-                self.logger.info("尝试重启定时任务")
+                self.logger.info(f"实例 #{self._instance_id} 尝试重启定时任务")
                 self.timer_task = asyncio.create_task(self._timer_loop(config))
+        except Exception as e:
+            # 捕获所有其他异常，防止任务静默退出
+            self.logger.error(f"实例 #{self._instance_id} 定时任务未知异常: {type(e).__name__}: {e}")
+            self.status = TimerTaskStatus.ERROR
+            TimerManager._global_is_executing = False
+            # 未知异常不重试，避免无限递归
+            self.logger.critical(f"实例 #{self._instance_id} 定时任务因未知异常停止，不再自动重试")
     
     @safe_timer_operation(default_return=False)
     async def _execute_push_task(self, config) -> bool:

@@ -98,7 +98,7 @@
   },
   "milestone_targets": {
     "type": "list",
-    "item_type": "number",
+    "item_type": "int",
     "description": "里程碑次数列表",
     "hint": "触发推送的发言次数里程碑，如 [666, 1000, 5000, 10000]",
     "default": [666, 1000, 2333, 5000, 6666, 10000, 23333]

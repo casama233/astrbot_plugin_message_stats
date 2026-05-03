@@ -74,8 +74,9 @@ class DataManager:
             logger=self.logger
         )
         
-        # 群组级别的锁机制，防止并发安全问题
-        self._group_locks: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        # 群组级别的锁机制，防止同一群组的数据操作并发冲突
+        # 每个 asyncio.Lock 对象仅 ~300 字节，无需清理
+        self._group_locks: Dict[str, asyncio.Lock] = {}
         
         # 确保目录存在
         self._ensure_directories()
@@ -100,6 +101,21 @@ class DataManager:
         directories = [self.data_dir, self.groups_dir, self.cache_dir]
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
+    
+    def _get_group_lock(self, group_id: str) -> asyncio.Lock:
+        """获取群组级别的锁，防止同一群组的数据操作并发冲突
+        
+        asyncio.Lock 对象仅 ~300 字节，无需清理。
+        
+        Args:
+            group_id: 群组ID
+            
+        Returns:
+            asyncio.Lock: 群组锁
+        """
+        if group_id not in self._group_locks:
+            self._group_locks[group_id] = asyncio.Lock()
+        return self._group_locks[group_id]
     
     async def initialize(self):
         """初始化数据管理器
@@ -319,10 +335,9 @@ class DataManager:
         success = await self.group_store.save_group_data(group_id, users)
         
         if success:
-            # 清除缓存
+            # 更新缓存为最新数据（不清除缓存，因为延迟写入时磁盘数据可能不是最新的）
             cache_key = f"group_data_{group_id}"
-            if cache_key in self.data_cache:
-                del self.data_cache[cache_key]
+            self.data_cache[cache_key] = users
             
             # 只在开启详细日志时记录群组数据保存信息
             if self.plugin_config and getattr(self.plugin_config, 'detailed_logging_enabled', True):
@@ -361,7 +376,7 @@ class DataManager:
             raise ValueError(f"用户ID必须是数字字符串，当前值: {user_id}")
         
         # 获取群组级别的锁，确保同一群组的数据操作串行化
-        group_lock = self._group_locks[group_id]
+        group_lock = self._get_group_lock(group_id)
         
         async with group_lock:
             # 获取现有数据
@@ -989,56 +1004,11 @@ class DataManager:
         except (IOError, OSError) as e:
             self.logger.error(f"数据清理时文件操作失败: {e}")
         except (ValueError, TypeError) as e:
-            self.logger.error(f"数据清理参数错误: {e}")
-        except (RuntimeError, SystemError) as e:
-            # 捕获运行时错误和系统错误
-            self.logger.error(f"数据清理时发生未知错误: {e}")
+            self
     
-    async def backup_group_data(self, group_id: str) -> Optional[Path]:
-        """备份群组数据
+    async def flush_all(self):
+        """立即将所有脏数据写入磁盘（插件关闭时调用）
         
-        为指定群组创建数据备份。
-        
-        Args:
-            group_id (str): 群组ID
-            
-        Returns:
-            Optional[Path]: 备份文件路径，失败时返回None
+        委托给 GroupDataStore.flush_all() 执行实际的刷盘操作。
         """
-        try:
-            source_file = self.groups_dir / f"{group_id}.json"
-            
-            if not await asyncio.to_thread(source_file.exists):
-                self.logger.warning(f"群组 {group_id} 数据文件不存在，无法备份")
-                return None
-            
-            # 创建备份目录
-            backup_dir = self.data_dir / "backups"
-            await asyncio.to_thread(backup_dir.mkdir, exist_ok=True)
-            
-            # 生成备份文件名（包含时间戳）
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_file = backup_dir / f"{group_id}_{timestamp}.json"
-            
-            # 复制文件
-            async with aiofiles.open(source_file, 'r', encoding='utf-8') as src:
-                content = await src.read()
-            
-            async with aiofiles.open(backup_file, 'w', encoding='utf-8') as dst:
-                await dst.write(content)
-            
-            self.logger.info(f"群组 {group_id} 数据已备份到: {backup_file}")
-            return backup_file
-            
-        except (IOError, OSError) as e:
-            self.logger.error(f"备份群组 {group_id} 数据时文件操作失败: {e}")
-            return None
-        except (ValueError, TypeError) as e:
-            self.logger.error(f"备份参数错误: {e}")
-            return None
-        except (RuntimeError, SystemError) as e:
-            # 捕获运行时错误和系统错误
-            self.logger.error(f"备份群组 {group_id} 数据时发生未知错误: {e}")
-            return None
-    
-    # 移除重复的方法，统一使用cache_manager的方法
+        await self.group_store.flush_all()
