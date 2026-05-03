@@ -109,9 +109,6 @@ class MessageStatsPlugin(Star):
         # 初始化组件
         self.data_manager = DataManager(data_dir)
         
-        # 开发者可在插件目录下添加 CHANGELOG.md 文件来提供更新日志
-        self.changelog_path = os.path.join(os.path.dirname(__file__), "CHANGELOG.md")
-        
         # 使用AstrBot的标准配置系统
         self.config = config
         self.plugin_config = self._convert_to_plugin_config()
@@ -902,20 +899,6 @@ class MessageStatsPlugin(Star):
         """显示去年排行榜，别名：去年水群榜/去年发言排行/去年B话榜"""
         async for result in self._show_rank(event, RankType.LAST_YEAR):
             yield result
-            
-    @filter.command("更新日志")
-    async def show_changelog(self, event: AstrMessageEvent):
-        """显示插件更新日志"""
-        try:
-            if os.path.exists(self.changelog_path):
-                with open(self.changelog_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                yield event.plain_result(content)
-            else:
-                yield event.plain_result("暂无更新日志")
-        except Exception as e:
-            self.logger.error(f"读取更新日志失败: {e}")
-            yield event.plain_result("读取更新日志失败，请稍后重试")
     
     # ========== 设置命令 ==========
     
