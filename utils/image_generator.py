@@ -360,9 +360,7 @@ class ImageGenerator:
                 return
                 
             try:
-                if self.page:
-                    await self.page.close()
-                    self.page = None
+                # 不再在此处关闭self.page，因为页面已变为局部变量，由各自的任务自行关闭
                 if self.browser:
                     await self.browser.close()
                     self.browser = None
@@ -373,7 +371,6 @@ class ImageGenerator:
             except Exception as e:
                 self.logger.warning(f"关闭浏览器时发生错误: {e}")
             finally:
-                self.page = None
                 self.browser = None
                 self.playwright = None
     
@@ -428,33 +425,34 @@ class ImageGenerator:
         await self._ensure_browser()
         
         temp_path = None
+        page = None
         
         try:
-            # 创建页面（开启两倍高清渲染）
-            self.page = await self.browser.new_page(device_scale_factor=2)
+            # 创建局部页面变量，防止并发时互相覆盖（开启两倍高清渲染）
+            page = await self.browser.new_page(device_scale_factor=2)
             
             # 设置视口
-            await self.page.set_viewport_size({"width": self.width, "height": self.viewport_height})
+            await page.set_viewport_size({"width": self.width, "height": self.viewport_height})
             
             # 生成HTML内容
             html_content = await self._generate_html(users, group_info, title, current_user_id)
             
             # 设置页面内容（使用 load 而非 networkidle，避免外部资源加载超时）
-            await self.page.set_content(html_content, wait_until="load")
+            await page.set_content(html_content, wait_until="load")
             
             # 等待页面加载完成
-            await self.page.wait_for_timeout(2000)
+            await page.wait_for_timeout(2000)
             
             # 动态调整页面高度
-            body_height = await self.page.evaluate("document.body.scrollHeight")
-            await self.page.set_viewport_size({"width": self.width, "height": body_height})
+            body_height = await page.evaluate("document.body.scrollHeight")
+            await page.set_viewport_size({"width": self.width, "height": body_height})
             
             # 生成临时文件路径（异步方式）
             temp_filename = f"rank_image_{uuid.uuid4().hex}.png"
             temp_path = Path(tempfile.gettempdir()) / temp_filename
             
             # 截图
-            await self.page.screenshot(path=temp_path, full_page=True)
+            await page.screenshot(path=temp_path, full_page=True)
             
             return str(temp_path)
         
@@ -474,9 +472,11 @@ class ImageGenerator:
             raise ImageGenerationError(f"生成图片失败: {e}")
         
         finally:
-            if self.page:
-                await self.page.close()
-                self.page = None
+            if page:
+                try:
+                    await page.close()
+                except Exception as e:
+                    self.logger.warning(f"关闭页面时发生错误: {e}")
             
             # 生成完毕后关闭浏览器释放内存
             await self._close_browser()
@@ -518,11 +518,12 @@ class ImageGenerator:
         # 按需启动浏览器
         await self._ensure_browser()
         
+        page = None
         try:
-            # 创建页面（里程碑卡片使用较窄的视口，开启两倍高清渲染）
-            self.page = await self.browser.new_page(device_scale_factor=2)
+            # 创建局部页面变量（里程碑卡片使用较窄的视口，开启两倍高清渲染）
+            page = await self.browser.new_page(device_scale_factor=2)
             milestone_width = 600
-            await self.page.set_viewport_size({"width": milestone_width, "height": self.viewport_height})
+            await page.set_viewport_size({"width": milestone_width, "height": self.viewport_height})
             
             # 加载里程碑模板
             milestone_template_path = self._templates_dir / "milestone_template.html"
@@ -566,19 +567,19 @@ class ImageGenerator:
                     html_content = html_content.replace('{{' + key + '}}', str(value))
             
             # 设置页面内容
-            await self.page.set_content(html_content, wait_until="load")
-            await self.page.wait_for_timeout(2000)
+            await page.set_content(html_content, wait_until="load")
+            await page.wait_for_timeout(2000)
             
             # 动态调整页面高度
-            body_height = await self.page.evaluate("document.body.scrollHeight")
-            await self.page.set_viewport_size({"width": milestone_width, "height": body_height})
+            body_height = await page.evaluate("document.body.scrollHeight")
+            await page.set_viewport_size({"width": milestone_width, "height": body_height})
             
             # 生成临时文件
             temp_filename = f"milestone_{uuid.uuid4().hex}.png"
             temp_path = Path(tempfile.gettempdir()) / temp_filename
             
             # 截图
-            await self.page.screenshot(path=temp_path, full_page=True)
+            await page.screenshot(path=temp_path, full_page=True)
             
             return str(temp_path)
         
@@ -597,9 +598,11 @@ class ImageGenerator:
             raise ImageGenerationError(f"生成图片失败: {e}")
         
         finally:
-            if self.page:
-                await self.page.close()
-                self.page = None
+            if page:
+                try:
+                    await page.close()
+                except Exception as e:
+                    self.logger.warning(f"关闭页面时发生错误: {e}")
             
             # 生成完毕后关闭浏览器释放内存
             await self._close_browser()
