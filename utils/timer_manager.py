@@ -34,7 +34,7 @@ from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from .models import RankType, UserData, GroupInfo
 from .data_manager import DataManager
 from .image_generator import ImageGenerator
-from .llm_analyzer import LLMAnalyzer, LLMConfig
+from .llm_analyzer import LLMAnalyzer
 from .date_utils import get_current_date, get_week_start, get_month_start
 from .exception_handlers import safe_timer_operation, safe_generation, safe_data_operation
 
@@ -644,16 +644,17 @@ class TimerManager:
         # 如果启用了 LLM 头衔分析，先调用 LLM 生成头衔
         if config.llm_enabled:
             try:
-                llm_cfg = LLMConfig.from_dict({
-                    "llm_enabled": True,
-                    "llm_api_base_url": getattr(config, 'llm_api_base_url', 'http://localhost:6185'),
-                    "llm_api_key": getattr(config, 'llm_api_key', ''),
-                    "llm_model": getattr(config, 'llm_model', ''),
-                    "llm_timeout": getattr(config, 'llm_timeout', 60),
-                    "llm_max_retries": getattr(config, 'llm_max_retries', 2),
-                    "llm_system_prompt": getattr(config, 'llm_system_prompt', ''),
-                })
-                llm_analyzer = LLMAnalyzer(llm_cfg)
+                # 使用 AstrBot 内部 Provider 系统调用 LLM
+                provider_id = getattr(config, 'llm_provider_id', '')
+                system_prompt = getattr(config, 'llm_system_prompt', '')
+                max_retries = getattr(config, 'llm_max_retries', 2)
+                
+                llm_analyzer = LLMAnalyzer(
+                    context=self.context,
+                    provider_id=provider_id,
+                    system_prompt=system_prompt,
+                    max_retries=max_retries
+                )
                 
                 # 获取群组名称用于提示词
                 grp_name = await self._get_group_name(group_id)
@@ -667,9 +668,6 @@ class TimerManager:
                             user.display_title = titles[user.user_id]
                 else:
                     self.logger.warning("⚠️ LLM 头衔生成结果为空，将使用不带头衔的排行榜")
-                
-                # 清理 LLM 分析器资源
-                await llm_analyzer.cleanup()
             except Exception as e:
                 self.logger.error(f"❌ LLM 头衔生成异常: {e}", exc_info=True)
                 self.logger.info("将使用不带头衔的排行榜继续推送")

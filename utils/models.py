@@ -412,13 +412,9 @@ class PluginConfig:
         
         # LLM 头衔分析配置
         self.llm_enabled = False
-        self.llm_api_base_url = "http://localhost:6185"
-        self.llm_api_key = ""
-        self.llm_model = ""
-        self.llm_timeout = 60
-        self.llm_max_retries = 2
+        self.llm_provider_id = ""
         self.llm_system_prompt = ""
-        self.llm_user_prompt_template = ""
+        self.llm_max_retries = 2
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典
@@ -460,13 +456,9 @@ class PluginConfig:
             "milestone_enabled": self.milestone_enabled,
             "milestone_targets": self.milestone_targets,
             "llm_enabled": self.llm_enabled,
-            "llm_api_base_url": self.llm_api_base_url,
-            "llm_api_key": self.llm_api_key,
-            "llm_model": self.llm_model,
-            "llm_timeout": self.llm_timeout,
-            "llm_max_retries": self.llm_max_retries,
+            "llm_provider_id": self.llm_provider_id,
             "llm_system_prompt": self.llm_system_prompt,
-            "llm_user_prompt_template": self.llm_user_prompt_template
+            "llm_max_retries": self.llm_max_retries
         }
     
     @classmethod
@@ -537,13 +529,9 @@ class PluginConfig:
         
         # LLM 头衔分析配置
         config.llm_enabled = data.get("llm_enabled", False)
-        config.llm_api_base_url = data.get("llm_api_base_url", "http://localhost:6185")
-        config.llm_api_key = data.get("llm_api_key", "")
-        config.llm_model = data.get("llm_model", "")
-        config.llm_timeout = data.get("llm_timeout", 60)
-        config.llm_max_retries = data.get("llm_max_retries", 2)
+        config.llm_provider_id = data.get("llm_provider_id", "")
         config.llm_system_prompt = data.get("llm_system_prompt", "")
-        config.llm_user_prompt_template = data.get("llm_user_prompt_template", "")
+        config.llm_max_retries = data.get("llm_max_retries", 2)
         
         return config
 

@@ -121,34 +121,18 @@
     "hint": "开启后，定时推送排行榜时将使用LLM根据发言数据为每个成员生成个性化头衔",
     "default": false
   },
-  "llm_api_base_url": {
+  "llm_provider_id": {
     "type": "string",
-    "description": "LLM API 地址",
-    "hint": "AstrBot API 地址，如 http://localhost:6185",
-    "default": "http://localhost:6185"
+    "description": "LLM Provider ID",
+    "_special": "select_provider",
+    "default": "",
+    "hint": "选择用于生成头衔的 LLM Provider。留空则使用当前会话的默认 Provider"
   },
-  "llm_api_key": {
+  "llm_system_prompt": {
     "type": "string",
-    "description": "LLM API Key（可选）",
-    "hint": "如果AstrBot开启了API Key认证，在此填写。留空则不使用认证。",
+    "description": "LLM 提示词（可选）",
+    "hint": "发给LLM的提示词，用于指导头衔生成风格。留空使用默认提示词。",
     "default": ""
-  },
-  "llm_model": {
-    "type": "string",
-    "description": "LLM 模型名称（可选）",
-    "hint": "指定使用的模型名称，如 gpt-4o-mini。留空则使用AstrBot默认模型。",
-    "default": ""
-  },
-  "llm_timeout": {
-    "type": "int",
-    "description": "LLM API 超时时间（秒）",
-    "hint": "调用LLM API的超时时间，建议30-120秒",
-    "default": 60,
-    "slider": {
-      "min": 10,
-      "max": 300,
-      "step": 10
-    }
   },
   "llm_max_retries": {
     "type": "int",
@@ -160,11 +144,5 @@
       "max": 5,
       "step": 1
     }
-  },
-  "llm_system_prompt": {
-    "type": "string",
-    "description": "LLM 系统提示词",
-    "hint": "发给LLM的系统提示词，用于指导头衔生成风格。建议保留默认值。",
-    "default": "你是一个擅长给群成员起有趣头衔的群聊分析师。\n请根据以下群成员的发言统计数据，为每个成员生成一个富有创意、幽默且贴合其发言风格的头衔。\n\n要求：\n1. 头衔要简短（不超过6个汉字），朗朗上口\n2. 结合数据特征（发言总数、排名、活跃天数等）进行创意发挥\n3. 风格可以多样：霸气、搞怪、吐槽、中二均可\n4. 不要使用侮辱性词汇\n5. 对发言最多的前3名给出更夸张、更酷的头衔\n\n请严格按照以下JSON格式返回，不要包含任何其他内容：\n```json\n{\n  \"titles\": {\n    \"用户ID_1\": \"头衔1\",\n    \"用户ID_2\": \"头衔2\"\n  }\n}\n```"
   }
 }
