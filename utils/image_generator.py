@@ -123,6 +123,10 @@ class ImageGenerator:
         self._cache_hits = 0
         self._cache_misses = 0
         
+        # 并发控制：浏览器的生命周期管理
+        self._browser_lock = asyncio.Lock()
+        self._active_tasks = 0
+        
         # Jinja2环境将在initialize方法中初始化
         self.jinja_env = None
     
@@ -315,53 +319,63 @@ class ImageGenerator:
             raise ImageGenerationError(f"初始化失败: {e}")
     
     async def _ensure_browser(self):
-        """确保浏览器已启动（懒加载）
+        """确保浏览器已启动（懒加载）并增加任务计数
         
-        如果浏览器尚未启动，则按需启动Playwright和Chromium。
-        生成图片后自动关闭浏览器以释放内存。
+        使用异步锁防止并发启动。如果是第一个任务则启动浏览器，
+        然后增加活跃任务计数器。
         """
-        if self.browser:
-            return
-        
-        self.logger.info("按需启动浏览器...")
-        try:
-            self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--disable-extensions"
-                ]
-            )
-            self.logger.info("Chromium浏览器启动成功")
-        except Exception as e:
-            self.logger.error(f"启动浏览器失败: {e}")
-            raise ImageGenerationError(f"启动浏览器失败: {e}")
+        async with self._browser_lock:
+            self._active_tasks += 1
+            if self.browser:
+                return
+            
+            self.logger.info("按需启动浏览器...")
+            try:
+                self.playwright = await async_playwright().start()
+                self.browser = await self.playwright.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-gpu",
+                        "--no-first-run",
+                        "--no-default-browser-check",
+                        "--disable-extensions"
+                    ]
+                )
+                self.logger.info("Chromium浏览器启动成功")
+            except Exception as e:
+                self._active_tasks -= 1
+                self.logger.error(f"启动浏览器失败: {e}")
+                raise ImageGenerationError(f"启动浏览器失败: {e}")
     
     async def _close_browser(self):
-        """关闭浏览器释放内存（每次生成图片后调用）"""
-        try:
-            if self.page:
-                await self.page.close()
+        """任务完成，减少任务计数，如果计数为0则关闭浏览器释放内存"""
+        async with self._browser_lock:
+            self._active_tasks = max(0, self._active_tasks - 1)
+            
+            if self._active_tasks > 0:
+                # 还有其他任务在使用浏览器，不关闭
+                return
+                
+            try:
+                if self.page:
+                    await self.page.close()
+                    self.page = None
+                if self.browser:
+                    await self.browser.close()
+                    self.browser = None
+                if self.playwright:
+                    await self.playwright.stop()
+                    self.playwright = None
+                self.logger.info("所有渲染任务完成，浏览器已关闭并释放内存")
+            except Exception as e:
+                self.logger.warning(f"关闭浏览器时发生错误: {e}")
+            finally:
                 self.page = None
-            if self.browser:
-                await self.browser.close()
                 self.browser = None
-            if self.playwright:
-                await self.playwright.stop()
                 self.playwright = None
-            self.logger.debug("浏览器已关闭，内存已释放")
-        except Exception as e:
-            self.logger.warning(f"关闭浏览器时发生错误: {e}")
-        finally:
-            self.page = None
-            self.browser = None
-            self.playwright = None
     
     async def cleanup(self):
         """清理资源
