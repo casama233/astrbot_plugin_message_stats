@@ -18,229 +18,190 @@
         }
 
         body {
-            background-color: #f0f2f5;
-            padding: 40px;
+            background-color: #a2e8d7;
+            padding: 60px 0;
             display: flex;
             justify-content: center;
             align-items: flex-start;
             min-height: 100vh;
         }
 
-        .card {
-            width: 500px;
-            background: #ffffff;
-            border-radius: 20px;
-            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.04);
-            padding: 35px 30px;
+        .poster {
+            width: 480px;
+            position: relative;
         }
 
-        /* ====== 顶部个人信息 ====== */
-        .profile-header {
+        .brand-header {
+            background-color: #ff2244;
+            color: white;
+            font-size: 23px;
+            font-weight: 900;
+            padding: 6px 14px;
+            border-radius: 25px;
+            display: inline-block;
+            margin-bottom: 25px;
+            margin-left: 10px;
+            line-height: 1.1;
+        }
+
+        /* ====== 文件夹底座控制 ====== */
+        .card-stage {
+            position: relative;
+            width: 480px;
+            height: 520px;
+            filter: drop-shadow(0 15px 35px rgba(0, 0, 0, 0.08));
+        }
+
+        .svg-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* 内容层 */
+        .content-layer {
+            position: relative;
+            z-index: 5;
+            padding: 90px 25px 0 25px;
+        }
+
+        .medal-box {
             display: flex;
             align-items: center;
-            margin-bottom: 35px;
+            margin-bottom: 20px;
         }
 
-        .avatar {
-            width: 86px;
-            height: 86px;
+        .medal-solid {
+            width: 160px;
+            height: 160px;
+            background-color: #ffe48b;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-right: 18px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        /* 缩小头像尺寸，露出更多底色 */
+        .ava-img {
+            width: 110px; /* 从 125px 缩减 */
+            height: 110px;
             border-radius: 50%;
             object-fit: cover;
-            margin-right: 20px;
-            /* 去掉外圈，仅保留轻微阴影让头像更立体 */
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+            background-color: #fff;
+            border: none;
         }
 
-        .user-info {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }
-
-        .nickname {
-            font-size: 28px;
-            font-weight: 700;
-            color: #111827;
-            margin-bottom: 4px;
-        }
-
-        .user-id {
-            font-size: 15px;
-            color: #6b7280;
-            margin-bottom: 4px;
-        }
-
-        .milestone-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            background-color: #e0e7ff;
-            color: #4f46e5;
-            font-size: 13px;
-            font-weight: 600;
-            border-radius: 12px;
-        }
-
-        /* ====== 四宫格数据 ====== */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-            margin-bottom: 35px;
-        }
-
-        .stat-box {
-            background-color: #f9fafb;
-            border-radius: 16px;
-            padding: 24px 16px;
-            text-align: center;
-        }
-
-        .stat-value {
-            font-size: 36px;
+        .nick-txt {
+            font-size: 34px;
             font-weight: 800;
-            margin-bottom: 6px;
-            line-height: 1;
+            color: #111;
+            padding-top: 20px;
         }
 
-        .stat-value.highlight {
-            color: #ec4899; /* 粉红色，与截图类似 */
+        .text-body {
+            text-align: left;
         }
 
-        .stat-value.normal {
-            color: #1f2937;
+        .eng-hint {
+            font-size: 21px;
+            color: #94a3b8;
+            margin-bottom: 0px;
+            font-weight: 700;
+            line-height: 0.9;
         }
 
-        .stat-label {
-            font-size: 14px;
-            color: #6b7280;
-            font-weight: 500;
-        }
-
-        /* ====== 列表数据 ====== */
-        .list-section {
-            margin-bottom: 35px;
-        }
-
-        .list-row {
+        .main-row {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 16px 0;
-            border-bottom: 1px solid #f3f4f6;
-        }
-
-        .list-row:last-child {
-            border-bottom: none;
-        }
-
-        .list-label {
-            font-size: 15px;
-            color: #6b7280;
-            font-weight: 500;
-        }
-
-        .list-value {
-            font-size: 15px;
-            color: #1f2937;
-            font-weight: 700;
-        }
-
-        /* ====== 底部印象框 ====== */
-        .impression-section {
+            align-items: baseline;
+            white-space: nowrap;
             margin-bottom: 10px;
-            margin-top: 24px;
+            margin-top: -15px;
         }
 
-        .impression-title {
-            font-size: 16px;
-            font-weight: 700;
-            color: #6b7280;
-            margin-bottom: 12px;
+        .label-txt {
+            font-size: 38px;
+            font-weight: 900;
+            color: #000;
         }
 
-        .impression-box {
-            background-color: #f9fafb;
-            border-radius: 16px;
-            padding: 20px;
-            font-size: 14px;
-            color: #4b5563;
-            line-height: 1.6;
-            text-align: justify;
+        .num-red {
+            font-size: 98px;
+            font-weight: 900;
+            color: #ff2244;
+            margin-left: 6px;
+            line-height: 1;
+            letter-spacing: -3px;
+        }
+
+        .percent-txt {
+            font-size: 28px;
+            font-weight: 800;
+            color: #111;
         }
 
         .footer {
-            margin-top: 20px;
-            text-align: center;
-            font-size: 12px;
-            color: #9ca3af;
-        }
-        
-        .footer p {
-            margin: 2px 0;
+            display: flex;
+            justify-content: space-between;
+            margin-top: 35px;
+            font-size: 15px;
+            font-weight: 800;
+            color: #111;
         }
         {% endraw %}
     </style>
 </head>
 
 <body>
-    <div class="card">
-        <!-- 顶部个人信息 -->
-        <div class="profile-header">
-            <img class="avatar" src="{{ avatar_url }}" alt="avatar" />
-            <div class="user-info">
-                <div class="nickname">{{ nickname }}</div>
-                <div class="user-id">{{ user_id }}</div>
-                <div class="milestone-badge" style="margin-top: 4px;">🏆 发言里程碑达成</div>
+    <div class="poster">
+        <div class="brand-header">群聊成就</div>
+
+        <div class="card-stage">
+            <svg class="svg-canvas" viewBox="0 0 480 520">
+                <path d="M 0,70 
+                         A 35,35 0 0 1 35,35 
+                         H 180 
+                         C 210,35 230,70 260,70 
+                         H 445 
+                         A 35,35 0 0 1 480,105 
+                         V 485 
+                         A 35,35 0 0 1 445,520 
+                         H 35 
+                         A 35,35 0 0 1 0,485 
+                         Z" fill="white" />
+                <polygon points="25,35 85,35 130,150 70,150" fill="#ffcbd1" />
+                <polygon points="185,35 125,35 80,150 140,150" fill="#ffcbd1" />
+            </svg>
+
+            <div class="content-layer">
+                <div class="medal-box">
+                    <div class="medal-solid">
+                        <img class="ava-img" src="{{ avatar_url }}" alt="avatar" />
+                    </div>
+                    <div class="nick-txt">{{ nickname }}</div>
+                </div>
+
+                <div class="text-body">
+                    <div class="eng-hint">Total number<br>of messages</div>
+                    <div class="main-row">
+                        <span class="label-txt">总发言破</span>
+                        <span class="num-red">{{ milestone_count }}</span>
+                    </div>
+                    <div class="percent-txt">
+                        { 击败了群内 <span style="color: #ff2244;">{{ percentage }}%</span> 的活跃群友 }
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- 四宫格数据 -->
-        <div class="stats-grid">
-            <div class="stat-box">
-                <div class="stat-value highlight">{{ milestone_count }}</div>
-                <div class="stat-label">发言次数</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-value normal">{{ rank }}</div>
-                <div class="stat-label">群内排名</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-value normal">{{ daily_count }}</div>
-                <div class="stat-label">今日发言</div>
-            </div>
-            <div class="stat-box">
-                <div class="stat-value normal">{{ active_days }}</div>
-                <div class="stat-label">活跃天数</div>
-            </div>
-        </div>
-
-        <!-- 列表数据 -->
-        <div class="list-section">
-            <div class="list-row">
-                <span class="list-label">所属群聊</span>
-                <span class="list-value">{{ group_name }}</span>
-            </div>
-            <div class="list-row">
-                <span class="list-label">群总发言数</span>
-                <span class="list-value">{{ group_total_messages }} 条 (占比 {{ percentage }}%)</span>
-            </div>
-            <div class="list-row">
-                <span class="list-label">最后发言</span>
-                <span class="list-value">{{ last_date }}</span>
-            </div>
-        </div>
-
-        <!-- 底部成就框 -->
-        <div class="impression-section">
-            <div class="impression-title">里程碑成就</div>
-            <div class="impression-box">
-                太厉害了！{{ nickname }} 在本群的发言次数成功突破了 <b>{{ milestone_count }}</b> 次大关！你留下的每一条消息，都是群聊历史中不可或缺的印记。继续保持这份活跃，期待你创造更高的纪录！
-            </div>
-        </div>
-        
         <div class="footer">
-            <p>🤖 由 AstrBot 发言统计插件生成</p>
-            <p>{{ current_time }}</p>
+            <span>&lt; {{ group_name }} &gt;</span>
+            <span>milestone card :)</span>
         </div>
     </div>
 </body>
