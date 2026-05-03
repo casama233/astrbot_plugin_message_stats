@@ -416,8 +416,8 @@ class ImageGenerator:
         temp_path = None
         
         try:
-            # 创建页面
-            self.page = await self.browser.new_page()
+            # 创建页面（开启两倍高清渲染）
+            self.page = await self.browser.new_page(device_scale_factor=2)
             
             # 设置视口
             await self.page.set_viewport_size({"width": self.width, "height": self.viewport_height})
@@ -469,6 +469,126 @@ class ImageGenerator:
             
             # 注意：不在这里删除临时文件，让调用方负责清理
             # 以避免在返回路径后立即删除文件的问题
+    
+    @safe_generation(default_return=None)
+    async def generate_milestone_image(self,
+                                       user_id: str,
+                                       nickname: str,
+                                       milestone_count: int,
+                                       rank: int,
+                                       daily_count: int,
+                                       active_days: int,
+                                       last_date: str,
+                                       group_total_messages: int,
+                                       percentage: float,
+                                       group_info: GroupInfo) -> str:
+        """生成里程碑个人成就卡片图片
+        
+        生成一张精美的个人成就卡片，替代里程碑触发时发送整个排行榜。
+        
+        Args:
+            user_id: 用户ID
+            nickname: 用户昵称
+            milestone_count: 里程碑发言次数
+            rank: 群内排名
+            daily_count: 今日发言数
+            active_days: 活跃天数
+            last_date: 最后发言日期
+            group_total_messages: 群总发言数
+            percentage: 发言占比
+            group_info: 群组信息
+            
+        Returns:
+            str: 生成的图片路径，失败时返回None
+        """
+        # 按需启动浏览器
+        await self._ensure_browser()
+        
+        try:
+            # 创建页面（里程碑卡片使用较窄的视口，开启两倍高清渲染）
+            self.page = await self.browser.new_page(device_scale_factor=2)
+            milestone_width = 600
+            await self.page.set_viewport_size({"width": milestone_width, "height": self.viewport_height})
+            
+            # 加载里程碑模板
+            milestone_template_path = self._templates_dir / "milestone_template.html"
+            template_content = ""
+            if await aiofiles.os.path.exists(milestone_template_path):
+                async with aiofiles.open(milestone_template_path, 'r', encoding='utf-8') as f:
+                    template_content = await f.read()
+            else:
+                self.logger.warning(f"里程碑模板文件不存在: {milestone_template_path}")
+                return None
+            
+            # 准备模板数据
+            avatar_url = self._get_avatar_url(user_id, "qq")
+            group_name = group_info.group_name or f"群{group_info.group_id}"
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            template_data = {
+                'avatar_url': avatar_url,
+                'nickname': self._escape_html_safe(nickname),
+                'user_id': self._escape_html_safe(str(user_id)),
+                'group_name': self._escape_html_safe(f"{group_name}[{group_info.group_id}]"),
+                'milestone_count': milestone_count,
+                'rank': rank,
+                'daily_count': daily_count,
+                'active_days': active_days,
+                'last_date': self._escape_html_safe(last_date or "未知"),
+                'group_total_messages': group_total_messages,
+                'percentage': f"{percentage:.2f}",
+                'current_time': current_time,
+            }
+            
+            # 渲染模板
+            if JINJA2_AVAILABLE and self.jinja_env:
+                template = self.jinja_env.from_string(template_content)
+                html_content = template.render(**template_data)
+            else:
+                # 回退：简单占位符替换
+                html_content = template_content
+                for key, value in template_data.items():
+                    html_content = html_content.replace('{{ ' + key + ' }}', str(value))
+                    html_content = html_content.replace('{{' + key + '}}', str(value))
+            
+            # 设置页面内容
+            await self.page.set_content(html_content, wait_until="load")
+            await self.page.wait_for_timeout(2000)
+            
+            # 动态调整页面高度
+            body_height = await self.page.evaluate("document.body.scrollHeight")
+            await self.page.set_viewport_size({"width": milestone_width, "height": body_height})
+            
+            # 生成临时文件
+            temp_filename = f"milestone_{uuid.uuid4().hex}.png"
+            temp_path = Path(tempfile.gettempdir()) / temp_filename
+            
+            # 截图
+            await self.page.screenshot(path=temp_path, full_page=True)
+            
+            return str(temp_path)
+        
+        except FileNotFoundError as e:
+            self.logger.error(f"里程碑模板文件未找到: {e}")
+            raise ImageGenerationError(f"文件资源未找到: {e}")
+        except PermissionError as e:
+            self.logger.error(f"权限错误: {e}")
+            raise ImageGenerationError(f"权限不足: {e}")
+        except TimeoutError as e:
+            self.logger.error(f"浏览器操作超时: {e}")
+            raise ImageGenerationError(f"操作超时: {e}")
+        except RuntimeError as e:
+            self.logger.error(f"生成里程碑卡片失败: {e}")
+            self.logger.error(f"详细错误: {traceback.format_exc()}")
+            raise ImageGenerationError(f"生成图片失败: {e}")
+        
+        finally:
+            if self.page:
+                await self.page.close()
+                self.page = None
+            
+            # 生成完毕后关闭浏览器释放内存
+            await self._close_browser()
     
     @safe_generation(default_return="")
     async def _generate_html(self, 

@@ -643,10 +643,11 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"记录消息统计失败: {nickname}")
     
     async def _check_milestone(self, group_id: str, user_id: str, nickname: str, current_count: int):
-        """检测用户发言是否达到里程碑，达到则自动推送排行榜
+        """检测用户发言是否达到里程碑，达到则自动推送个人成就卡片
         
         性能优化：仅在 milestone_enabled=True 且 current_count 在 milestone_targets 中时才执行后续操作。
         使用缓存防止同一里程碑重复推送。
+        推送个人成就卡片而非整个排行榜，减少数据查询和渲染开销。
         
         Args:
             group_id (str): 群组ID
@@ -670,7 +671,7 @@ class MessageStatsPlugin(Star):
         # 标记已推送（先标记再执行，防止并发重复推送）
         self.member_cache.mark_milestone_cached(group_id, user_id, current_count)
         
-        self.logger.info(f"🎉 用户 {nickname} 发言达到 {current_count} 次里程碑，准备推送排行榜")
+        self.logger.info(f"🎉 用户 {nickname} 发言达到 {current_count} 次里程碑，准备推送个人成就卡片")
         
         try:
             # 获取群组的 unified_msg_origin
@@ -679,41 +680,67 @@ class MessageStatsPlugin(Star):
                 self.logger.warning(f"群组 {group_id} 缺少 unified_msg_origin，无法推送里程碑")
                 return
             
-            # 获取群组数据并生成排行榜
+            # 获取群组数据
             group_data = await self.data_manager.get_group_data(group_id)
             if not group_data:
                 return
             
-            # 使用总排行榜（total）展示所有历史数据
-            rank_type = RankType.TOTAL
-            filtered_data = await self._filter_data_by_rank_type(group_data, rank_type)
-            if not filtered_data:
-                return
+            # 计算用户的群内排名和群总发言数
+            rank = 1
+            group_total_messages = 0
+            target_user_data = None
             
-            # 排序并限制数量
-            filtered_data.sort(key=lambda x: x[1], reverse=True)
-            limited_data = filtered_data[:self.plugin_config.rand]
+            for user_data_item in group_data:
+                if not isinstance(user_data_item, UserData):
+                    continue
+                group_total_messages += user_data_item.message_count
+                if user_data_item.message_count > current_count:
+                    rank += 1
+                if user_data_item.user_id == user_id:
+                    target_user_data = user_data_item
             
-            users_for_rank = []
-            for user_data_item, count in limited_data:
-                user_data_item.display_total = count
-                users_for_rank.append(user_data_item)
+            # 计算发言占比
+            percentage = (current_count / group_total_messages * 100) if group_total_messages > 0 else 0
+            
+            # 计算今日发言数
+            daily_count = 0
+            if target_user_data:
+                from datetime import date as date_cls
+                today = date_cls.today()
+                daily_count = target_user_data.get_message_count_in_period(today, today)
+            
+            # 计算活跃天数（_message_dates 中的键数量）
+            active_days = 0
+            if target_user_data:
+                target_user_data._ensure_message_dates()
+                active_days = len(target_user_data._message_dates)
+            
+            # 获取最后发言日期
+            last_date = ""
+            if target_user_data and target_user_data.last_date:
+                last_date = target_user_data.last_date
             
             # 创建群组信息
             group_info = GroupInfo(group_id=str(group_id))
             group_name = await self._get_group_name(None, group_id)
             group_info.group_name = group_name
             
-            # 生成标题
-            title = f"🎉 恭喜 {nickname} 发言突破 {current_count} 次！"
-            
-            # 生成排行榜图片
-            image_path = await self.image_generator.generate_rank_image(
-                users_for_rank, group_info, title, user_id
+            # 生成里程碑个人成就卡片
+            image_path = await self.image_generator.generate_milestone_image(
+                user_id=user_id,
+                nickname=nickname,
+                milestone_count=current_count,
+                rank=rank,
+                daily_count=daily_count,
+                active_days=active_days,
+                last_date=last_date,
+                group_total_messages=group_total_messages,
+                percentage=percentage,
+                group_info=group_info
             )
             
             if not image_path:
-                self.logger.warning("里程碑推送：图片生成失败")
+                self.logger.warning("里程碑推送：个人卡片生成失败")
                 return
             
             # 构建消息并推送
@@ -737,6 +764,104 @@ class MessageStatsPlugin(Star):
     
     # ========== 排行榜命令 ==========
     
+    @filter.command("发言榜里程碑", alias={'发言里程碑'})
+    async def show_my_milestone(self, event: AstrMessageEvent):
+        """显示个人里程碑成就卡片，别名：发言里程碑"""
+        group_id = event.get_group_id()
+        user_id = event.get_sender_id()
+        
+        if not group_id or not user_id:
+            yield event.plain_result("无法获取群组或用户信息,请在群聊中使用此命令！")
+            return
+            
+        group_id, user_id = str(group_id), str(user_id)
+        
+        # 获取用户昵称
+        nickname = await self._get_user_display_name(event, group_id, user_id)
+        
+        try:
+            # 获取群组数据
+            group_data = await self.data_manager.get_group_data(group_id)
+            if not group_data:
+                yield event.plain_result("该群暂无发言数据！")
+                return
+            
+            # 计算用户的群内排名和群总发言数
+            rank = 1
+            group_total_messages = 0
+            target_user_data = None
+            
+            for user_data_item in group_data:
+                if not isinstance(user_data_item, UserData):
+                    continue
+                group_total_messages += user_data_item.message_count
+                if user_data_item.user_id == user_id:
+                    target_user_data = user_data_item
+            
+            if not target_user_data:
+                # 重新计算排名，如果用户没有发言数据
+                for user_data_item in group_data:
+                    if isinstance(user_data_item, UserData) and user_data_item.message_count > 0:
+                        rank += 1
+                current_count = 0
+            else:
+                current_count = target_user_data.message_count
+                # 如果已经找到了 target_user_data，需要重新正确计算排名
+                rank = 1
+                for user_data_item in group_data:
+                    if isinstance(user_data_item, UserData) and user_data_item.message_count > current_count:
+                        rank += 1
+            
+            # 计算发言占比
+            percentage = (current_count / group_total_messages * 100) if group_total_messages > 0 else 0
+            
+            # 计算今日发言数
+            daily_count = 0
+            if target_user_data:
+                from datetime import date as date_cls
+                today = date_cls.today()
+                daily_count = target_user_data.get_message_count_in_period(today, today)
+            
+            # 计算活跃天数
+            active_days = 0
+            if target_user_data:
+                target_user_data._ensure_message_dates()
+                active_days = len(target_user_data._message_dates)
+            
+            # 获取最后发言日期
+            last_date = ""
+            if target_user_data and target_user_data.last_date:
+                last_date = target_user_data.last_date
+            
+            # 创建群组信息
+            group_info = GroupInfo(group_id=str(group_id))
+            group_name = await self._get_group_name(event, group_id)
+            group_info.group_name = group_name
+            
+            # 生成里程碑个人成就卡片
+            image_path = await self.image_generator.generate_milestone_image(
+                user_id=user_id,
+                nickname=nickname,
+                milestone_count=current_count,
+                rank=rank,
+                daily_count=daily_count,
+                active_days=active_days,
+                last_date=last_date,
+                group_total_messages=group_total_messages,
+                percentage=percentage,
+                group_info=group_info
+            )
+            
+            if not image_path:
+                yield event.plain_result("个人里程碑卡片生成失败！")
+                return
+            
+            # 使用框架标准的 image_result 返回图片
+            yield event.image_result(image_path)
+                    
+        except Exception as e:
+            self.logger.error(f"里程碑获取失败: {e}", exc_info=True)
+            yield event.plain_result(f"获取里程碑失败: {str(e)}")
 
     
     @filter.command("发言榜", alias={'水群榜', 'B话榜', '发言排行', '发言统计'})
