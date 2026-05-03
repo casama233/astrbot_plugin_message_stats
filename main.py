@@ -1413,8 +1413,9 @@ class MessageStatsPlugin(Star):
             # 过滤屏蔽用户
             if self._is_blocked_user(user.user_id):
                 continue
-                
-            if not user.history:
+            
+            # 检查是否有发言记录（兼容新旧两种存储格式）
+            if not user._message_dates and not user.history:
                 continue
             
             # 计算指定时间段的发言次数
@@ -1426,8 +1427,9 @@ class MessageStatsPlugin(Star):
     
     async def _calculate_period_rank_optimized(self, group_data: List[UserData], start_date, end_date) -> List[tuple]:
         """计算周榜/月榜（优化策略）"""
-        # 优化策略：先筛选出有历史记录的用户，然后批量计算
-        active_users = [user for user in group_data if user.history]
+        # 优化策略：先筛选出有发言记录的用户，然后批量计算
+        # 兼容新旧两种存储格式（_message_dates 或 history）
+        active_users = [user for user in group_data if user._message_dates or user.history]
         
         if not active_users:
             return []
@@ -1439,8 +1441,10 @@ class MessageStatsPlugin(Star):
             if self._is_blocked_user(user.user_id):
                 continue
                 
-            # 使用更高效的计算方法（现在是异步方法）
-            period_count = await self._count_messages_in_period_fast(user.history, start_date, end_date)
+            # 使用 UserData.get_message_count_in_period 方法计算
+            # 该方法内部使用 _message_dates 字典 O(1) 查询，比遍历 history 列表快得多
+            # 并且有 _ensure_message_dates 兜底保护，兼容旧数据格式
+            period_count = user.get_message_count_in_period(start_date, end_date)
             if period_count > 0:
                 filtered_users.append((user, period_count))
         
