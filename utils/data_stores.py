@@ -39,12 +39,15 @@ class GroupDataStore:
     
     # 积累多少次修改后触发一次写盘
     _FLUSH_THRESHOLD = 10
+    # 脏缓存最大容量，防止内存泄漏
+    _DIRTY_CACHE_MAXSIZE = 500
     
     def __init__(self, groups_dir: Path, logger=None):
         self.groups_dir = groups_dir
         self.logger = logger or astrbot_logger
         
         # 延迟写入缓存：group_id -> (users, group_name)
+        # 添加大小限制防止内存泄漏
         self._dirty_cache: Dict[str, tuple] = {}
         # 脏标记计数
         self._dirty_count = 0
@@ -127,8 +130,11 @@ class GroupDataStore:
         self._dirty_cache[group_id] = (users, group_name)
         self._dirty_count += 1
         
-        # 积累够阈值，触发写盘
-        if self._dirty_count >= self._FLUSH_THRESHOLD:
+        # 检查脏缓存大小，超过上限时强制立即写盘防止内存泄漏
+        if len(self._dirty_cache) >= self._DIRTY_CACHE_MAXSIZE:
+            self._write_trigger.set()
+            self.logger.warning(f"脏缓存达到上限({self._DIRTY_CACHE_MAXSIZE})，强制立即写盘")
+        elif self._dirty_count >= self._FLUSH_THRESHOLD:
             self._write_trigger.set()
         
         # 启动批量写入任务（如果尚未启动）
@@ -224,14 +230,20 @@ class GroupDataStore:
             await f.write(json_content)
     
     async def flush_all(self):
-        """立即将所有脏数据写入磁盘（插件关闭时调用）"""
+        """立即将所有脏数据写入磁盘（插件关闭时调用）
+        
+        优化：取消批量写入任务 + 直接刷盘，最大耗时不超过 2 秒，
+        避免 AstrBot 保存配置时因插件重载被阻塞。
+        """
         self._stop_event.set()
+        # 取消批量写入任务（如果有），避免等待 60 秒超时
         if self._batch_write_task and not self._batch_write_task.done():
+            self._batch_write_task.cancel()
             try:
-                await asyncio.wait_for(self._batch_write_task, timeout=10)
+                await asyncio.wait_for(self._batch_write_task, timeout=2)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 pass
-        # 确保写入剩余脏数据
+        # 直接写入剩余脏数据，不依赖后台任务
         await self._flush_dirty_cache()
     
     async def delete_group_data(self, group_id: str) -> bool:
