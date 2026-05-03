@@ -335,10 +335,9 @@ class DataManager:
         success = await self.group_store.save_group_data(group_id, users)
         
         if success:
-            # 清除缓存
+            # 更新缓存为最新数据（不清除缓存，因为延迟写入时磁盘数据可能不是最新的）
             cache_key = f"group_data_{group_id}"
-            if cache_key in self.data_cache:
-                del self.data_cache[cache_key]
+            self.data_cache[cache_key] = users
             
             # 只在开启详细日志时记录群组数据保存信息
             if self.plugin_config and getattr(self.plugin_config, 'detailed_logging_enabled', True):
