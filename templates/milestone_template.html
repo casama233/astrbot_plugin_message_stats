@@ -48,7 +48,7 @@
         .card-stage {
             position: relative;
             width: 480px;
-            height: 520px;
+            height: 560px;
             filter: drop-shadow(0 15px 35px rgba(0, 0, 0, 0.08));
         }
 
@@ -87,14 +87,12 @@
             flex-shrink: 0;
         }
 
-        /* 缩小头像尺寸，露出更多底色 */
         .ava-img {
-            width: 110px; /* 从 125px 缩减 */
+            width: 110px;
             height: 110px;
             border-radius: 50%;
             object-fit: cover;
             background-color: #fff;
-            border: none;
         }
 
         .nick-txt {
@@ -116,11 +114,12 @@
             line-height: 0.9;
         }
 
+        /* 统一行间距控制 */
         .main-row {
             display: flex;
             align-items: baseline;
             white-space: nowrap;
-            margin-bottom: 10px;
+            margin-bottom: 8px; /* 设置统一的下边距 */
             margin-top: -15px;
         }
 
@@ -139,16 +138,23 @@
             letter-spacing: -3px;
         }
 
-        .percent-txt {
+        .info-row {
             font-size: 28px;
             font-weight: 800;
             color: #111;
+            margin-bottom: 8px; /* 设置与 main-row 相同的下边距，最后一行除外 */
+            line-height: 1.2;
+            letter-spacing: -0.5px;
+        }
+
+        .info-row:last-child {
+            margin-bottom: 0;
         }
 
         .footer {
             display: flex;
             justify-content: space-between;
-            margin-top: 35px;
+            margin-top: 40px;
             font-size: 15px;
             font-weight: 800;
             color: #111;
@@ -162,17 +168,17 @@
         <div class="brand-header">群聊成就</div>
 
         <div class="card-stage">
-            <svg class="svg-canvas" viewBox="0 0 480 520">
+            <svg class="svg-canvas" viewBox="0 0 480 560">
                 <path d="M 0,70 
                          A 35,35 0 0 1 35,35 
                          H 180 
                          C 210,35 230,70 260,70 
                          H 445 
                          A 35,35 0 0 1 480,105 
-                         V 485 
-                         A 35,35 0 0 1 445,520 
+                         V 525 
+                         A 35,35 0 0 1 445,560 
                          H 35 
-                         A 35,35 0 0 1 0,485 
+                         A 35,35 0 0 1 0,525 
                          Z" fill="white" />
                 <polygon points="25,35 85,35 130,150 70,150" fill="#ffcbd1" />
                 <polygon points="185,35 125,35 80,150 140,150" fill="#ffcbd1" />
@@ -192,7 +198,11 @@
                         <span class="label-txt">总发言破</span>
                         <span class="num-red">{{ milestone_count }}</span>
                     </div>
-                    <div class="percent-txt">
+                    
+                    <div class="info-row">
+                        群内排名 <span style="color: #ff2244;">#{{ rank }}</span>
+                    </div>
+                    <div class="info-row">
                         { 击败了群内 <span style="color: #ff2244;">{{ percentage }}%</span> 的活跃群友 }
                     </div>
                 </div>
