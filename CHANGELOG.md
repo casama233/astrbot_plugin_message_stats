@@ -10,6 +10,8 @@
 
 - **修复 `_get_avatar_url()` 处理 Telegram 负数用户 ID 时的潜在崩溃**：`int(user_id) % 5` 对负数字符串 ID 直接 `int()` 转换可能抛出异常。现已改用 `abs(int(user_id))` 取绝对值，并添加 `ValueError`/`TypeError` 兜底处理。
 
+- **修复定时推送没有数据的问题**：`timer_manager._filter_data_by_rank_type()` 只检查旧的 `user.history` 列表来判断用户是否有发言记录，但新版数据改用 `_message_dates` 字典存储。修复方案：添加 `user._ensure_message_dates()` 兜底保护，并同时检查 `_message_dates` 和 `history`。
+
 ### 🚀 性能与内存优化
 
 - **修复群组锁清理条件缺陷**：`_get_group_lock()` 的过期锁清理条件原为 `len > 100 and len % 100 == 0`，导致 101~199 个锁时不会触发清理。现已改为 `>= 100 and (len % 50 == 0 or len > 1000)`，确保锁数量持续增长时仍能自动清理。

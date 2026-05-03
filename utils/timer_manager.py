@@ -643,12 +643,18 @@ class TimerManager:
         # 根据排行榜类型筛选数据
         # 定时推送强制使用今日排行榜
         rank_type = RankType.DAILY
-        self.logger.info(f"群组 {group_id} 定时推送使用今日排行榜")
-        
         filtered_data = await self._filter_data_by_rank_type(group_data, rank_type)
         if not filtered_data:
-            self.logger.warning(f"群组 {group_id} 没有符合条件的用户数据")
-            return False
+            # 今日无数据（如凌晨推送），回退到昨日数据
+            yesterday = datetime.now().date() - timedelta(days=1)
+            filtered_data = [(user, user.get_message_count_in_period(yesterday, yesterday)) for user in group_data if user.get_message_count_in_period(yesterday, yesterday) > 0]
+            if filtered_data:
+                self.logger.info(f"群组 {group_id} 今日无数据，回退到昨日({yesterday})数据")
+            else:
+                self.logger.warning(f"群组 {group_id} 今日和昨日均无数据")
+                return False
+        else:
+            self.logger.info(f"群组 {group_id} 定时推送使用今日排行榜")
         
         # 排序数据
         filtered_data.sort(key=lambda x: x[1], reverse=True)
@@ -880,7 +886,10 @@ class TimerManager:
             # 时间段过滤
             filtered_users = []
             for user in group_data:
-                if not user.history:
+                # 兼容新旧两种数据格式：_message_dates（新）或 history（旧）
+                # 先确保 _message_dates 数据完整（兜底保护）
+                user._ensure_message_dates()
+                if not user._message_dates and not user.history:
                     continue
                 
                 # 计算指定时间段的发言次数
