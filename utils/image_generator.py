@@ -281,37 +281,51 @@ class ImageGenerator:
     
     @safe_generation(default_return=None)
     async def initialize(self):
-        """初始化图片生成器
+        """初始化图片生成器（轻量初始化）
         
-        异步初始化Playwright浏览器和相关的渲染环境。
-        包括启动浏览器实例和配置渲染参数。
+        只初始化Jinja2模板环境，不启动浏览器。
+        浏览器将在首次生成图片时按需启动（懒加载）。
         
         Raises:
-            ImageGenerationError: 当Playwright未安装或初始化失败时抛出
-            OSError: 当浏览器启动失败时抛出
+            ImageGenerationError: 当Playwright未安装时抛出
             
         Returns:
-            None: 无返回值，初始化成功后浏览器实例可用
-            
-        Example:
-            >>> generator = ImageGenerator(config)
-            >>> await generator.initialize()
-            >>> print(generator.browser is not None)
-            True
+            None: 无返回值
         """
         if not PLAYWRIGHT_AVAILABLE:
             self.logger.error("Playwright未安装，图片生成功能将不可用")
             raise ImageGenerationError("Playwright未安装，无法生成图片")
         
         try:
-            self.logger.info("开始初始化图片生成器...")
+            self.logger.info("开始初始化图片生成器（轻量模式）...")
             
-            # 首先初始化Jinja2环境
+            # 只初始化Jinja2环境，浏览器按需启动
             await self._init_jinja2_env()
             
+            self.logger.info("图片生成器初始化完成（浏览器未启动，将在首次生成图片时按需启动）")
+        except FileNotFoundError as e:
+            self.logger.error(f"模板文件未找到: {e}")
+            raise ImageGenerationError(f"模板文件未找到: {e}")
+        except PermissionError as e:
+            self.logger.error(f"权限错误: {e}")
+            raise ImageGenerationError(f"权限不足: {e}")
+        except OSError as e:
+            self.logger.error(f"初始化图片生成器失败: {e}")
+            self.logger.error(f"详细错误: {traceback.format_exc()}")
+            raise ImageGenerationError(f"初始化失败: {e}")
+    
+    async def _ensure_browser(self):
+        """确保浏览器已启动（懒加载）
+        
+        如果浏览器尚未启动，则按需启动Playwright和Chromium。
+        生成图片后自动关闭浏览器以释放内存。
+        """
+        if self.browser:
+            return
+        
+        self.logger.info("按需启动浏览器...")
+        try:
             self.playwright = await async_playwright().start()
-            self.logger.info("Playwright启动成功")
-            
             self.browser = await self.playwright.chromium.launch(
                 headless=True,
                 args=[
@@ -325,22 +339,29 @@ class ImageGenerator:
                 ]
             )
             self.logger.info("Chromium浏览器启动成功")
-            
-            self.logger.info("图片生成器初始化完成")
-        except FileNotFoundError as e:
-            self.logger.error(f"浏览器可执行文件未找到: {e}")
-            raise ImageGenerationError(f"浏览器未安装或路径错误: {e}")
-        except PermissionError as e:
-            self.logger.error(f"启动浏览器权限不足: {e}")
-            raise ImageGenerationError(f"权限不足，无法启动浏览器: {e}")
-        except ConnectionError as e:
-            self.logger.error(f"浏览器连接失败: {e}")
-            raise ImageGenerationError(f"浏览器连接失败: {e}")
-        except OSError as e:
-            # 捕获操作系统相关错误，如系统资源不足、进程启动失败等
-            self.logger.error(f"初始化图片生成器失败: {e}")
-            self.logger.error(f"详细错误: {traceback.format_exc()}")
-            raise ImageGenerationError(f"初始化失败: {e}")
+        except Exception as e:
+            self.logger.error(f"启动浏览器失败: {e}")
+            raise ImageGenerationError(f"启动浏览器失败: {e}")
+    
+    async def _close_browser(self):
+        """关闭浏览器释放内存（每次生成图片后调用）"""
+        try:
+            if self.page:
+                await self.page.close()
+                self.page = None
+            if self.browser:
+                await self.browser.close()
+                self.browser = None
+            if self.playwright:
+                await self.playwright.stop()
+                self.playwright = None
+            self.logger.debug("浏览器已关闭，内存已释放")
+        except Exception as e:
+            self.logger.warning(f"关闭浏览器时发生错误: {e}")
+        finally:
+            self.page = None
+            self.browser = None
+            self.playwright = None
     
     async def cleanup(self):
         """清理资源
@@ -385,12 +406,12 @@ class ImageGenerator:
                                  group_info: GroupInfo, 
                                  title: str,
                                  current_user_id: Optional[str] = None) -> str:
-        """生成排行榜图片"""
-        if not self.browser:
-            await self.initialize()
-        
+        """生成排行榜图片（懒加载浏览器，用完即关）"""
         # 每次生成图片时重新检查主题（支持自动主题切换实时生效）
         self._update_template_path()
+        
+        # 按需启动浏览器
+        await self._ensure_browser()
         
         temp_path = None
         
@@ -442,6 +463,9 @@ class ImageGenerator:
             if self.page:
                 await self.page.close()
                 self.page = None
+            
+            # 生成完毕后关闭浏览器释放内存
+            await self._close_browser()
             
             # 注意：不在这里删除临时文件，让调用方负责清理
             # 以避免在返回路径后立即删除文件的问题
@@ -1200,10 +1224,9 @@ class ImageGenerator:
         return default_template
     
     async def test_browser_connection(self) -> bool:
-        """测试浏览器连接"""
+        """测试浏览器连接（懒加载，用完即关）"""
         try:
-            if not self.browser:
-                await self.initialize()
+            await self._ensure_browser()
             
             # 创建一个测试页面
             test_page = await self.browser.new_page()
@@ -1231,6 +1254,8 @@ class ImageGenerator:
             # 捕获浏览器运行时错误，如页面操作失败、JavaScript执行错误等
             self.logger.error(f"测试浏览器连接失败: {e}")
             return False
+        finally:
+            await self._close_browser()
     
     async def get_browser_info(self) -> Dict[str, Any]:
         """获取浏览器信息"""
