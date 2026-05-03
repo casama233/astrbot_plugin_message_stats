@@ -286,6 +286,7 @@ class DataManager:
         """获取群组数据
         
         从缓存或文件读取指定群组的用户数据。
+        优先检查延迟写入缓存（_dirty_cache），确保获取到最新的内存数据。
         
         Args:
             group_id (str): 群组ID，必须是有效的数字字符串（支持负数，如Telegram群组ID）
@@ -301,7 +302,15 @@ class DataManager:
         
         cache_key = f"group_data_{group_id}"
         
-        # 检查缓存
+        # 优先检查延迟写入缓存（_dirty_cache），确保获取到最新的内存数据
+        # 防止 data_cache TTL 过期后从文件重新加载到旧数据
+        if group_id in self.group_store._dirty_cache:
+            dirty_users, _ = self.group_store._dirty_cache[group_id]
+            # 更新 data_cache 并返回
+            self.data_cache[cache_key] = dirty_users
+            return dirty_users
+        
+        # 检查 data_cache
         if cache_key in self.data_cache:
             return self.data_cache[cache_key]
         
