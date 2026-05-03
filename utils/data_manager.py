@@ -1005,3 +1005,10 @@ class DataManager:
             self.logger.error(f"数据清理时文件操作失败: {e}")
         except (ValueError, TypeError) as e:
             self
+    
+    async def flush_all(self):
+        """立即将所有脏数据写入磁盘（插件关闭时调用）
+        
+        委托给 GroupDataStore.flush_all() 执行实际的刷盘操作。
+        """
+        await self.group_store.flush_all()
