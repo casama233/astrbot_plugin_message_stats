@@ -75,8 +75,10 @@ class DataManager:
         )
         
         # 群组级别的锁机制，防止同一群组的数据操作并发冲突
-        # 每个 asyncio.Lock 对象仅 ~300 字节，无需清理
+        # 使用 TTLCache 自动清理长时间不用的锁，防止内存泄漏
         self._group_locks: Dict[str, asyncio.Lock] = {}
+        self._group_lock_ttl = 3600  # 1小时无访问自动清理
+        self._group_lock_access: Dict[str, float] = {}
         
         # 确保目录存在
         self._ensure_directories()
@@ -103,9 +105,9 @@ class DataManager:
             directory.mkdir(parents=True, exist_ok=True)
     
     def _get_group_lock(self, group_id: str) -> asyncio.Lock:
-        """获取群组级别的锁，防止同一群组的数据操作并发冲突
+        """获取群组级别的锁，自动清理长时间不用的锁
         
-        asyncio.Lock 对象仅 ~300 字节，无需清理。
+        使用访问时间记录，超过 _group_lock_ttl（小时）未访问的锁会被清理。
         
         Args:
             group_id: 群组ID
@@ -113,8 +115,25 @@ class DataManager:
         Returns:
             asyncio.Lock: 群组锁
         """
+        now = time.time()
+        
+        # 定期清理过期锁（每 100 次访问清理一次）
+        if len(self._group_locks) > 100 and len(self._group_locks) % 100 == 0:
+            expired = [
+                gid for gid, last_access in list(self._group_lock_access.items()) 
+                if now - last_access > self._group_lock_ttl
+            ]
+            for gid in expired:
+                self._group_locks.pop(gid, None)
+                self._group_lock_access.pop(gid, None)
+            if expired:
+                self.logger.debug(f"清理过期群组锁: {len(expired)}个")
+        
+        # 获取或创建锁
         if group_id not in self._group_locks:
             self._group_locks[group_id] = asyncio.Lock()
+            
+        self._group_lock_access[group_id] = now
         return self._group_locks[group_id]
     
     async def initialize(self):

@@ -141,34 +141,34 @@ class GroupDataStore:
         """批量写入循环：等待 _write_trigger 事件触发后写盘，零CPU空转"""
         try:
             while self._dirty_cache:
-                # 等待触发事件（积累够 _FLUSH_THRESHOLD 次）或停止信号
-                # 使用 asyncio.Event.wait() 直接等待，不创建额外task
-                # 通过 wait_for 添加超时，避免永久阻塞
+                # 检查是否收到停止信号
+                if self._stop_event.is_set():
+                    break
+                    
+                # 等待触发事件（积累够 _FLUSH_THRESHOLD 次），或超时（60秒，作为兜底防止数据长时间在内存中丢失）
                 try:
-                    # 同时等待写触发和停止事件
-                    # 使用 asyncio.wait 监听两个事件
-                    write_fut = asyncio.ensure_future(self._write_trigger.wait())
-                    stop_fut = asyncio.ensure_future(self._stop_event.wait())
-                    
-                    done, pending = await asyncio.wait(
-                        [write_fut, stop_fut],
-                        return_when=asyncio.FIRST_COMPLETED
-                    )
-                    
-                    for task in pending:
-                        task.cancel()
-                    
-                    if self._stop_event.is_set():
-                        break
-                    
-                    self._write_trigger.clear()
-                    await self._flush_dirty_cache()
+                    # 使用 wait_for 避免创建额外 task，同时设定 60 秒的强制兜底写入时间
+                    await asyncio.wait_for(self._write_trigger.wait(), timeout=60.0)
+                except asyncio.TimeoutError:
+                    # 超时兜底写入，无需任何特殊处理，直接进入写盘逻辑
+                    pass
                 except asyncio.CancelledError:
                     raise
                 
+                # 如果收到停止信号，退出循环（退出前会自动写盘）
+                if self._stop_event.is_set():
+                    break
+                
+                # 重置触发器，并执行写盘
+                self._write_trigger.clear()
+                await self._flush_dirty_cache()
+                
         except asyncio.CancelledError:
-            await self._flush_dirty_cache()
-            raise
+            pass
+        finally:
+            # 无论是正常退出、抛出异常还是被取消，都确保剩余的脏数据被写入
+            if self._dirty_cache:
+                await self._flush_dirty_cache()
     
     async def _flush_dirty_cache(self):
         """将脏缓存中的数据批量写入磁盘"""
