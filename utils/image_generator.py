@@ -983,7 +983,16 @@ class ImageGenerator:
         }
         
         service_url = avatar_services.get(platform, avatar_services["default"])
-        return service_url.format(user_id=user_id, avatar_id=int(user_id) % 5)
+        
+        # 安全计算 avatar_id：处理负数ID（Telegram）和非数字字符串ID
+        try:
+            uid_int = abs(int(user_id))  # 取绝对值，确保为正数
+            avatar_id = uid_int % 5
+        except (ValueError, TypeError):
+            # 如果 user_id 不是有效数字，使用默认值
+            avatar_id = 0
+        
+        return service_url.format(user_id=user_id, avatar_id=avatar_id)
     
     @safe_file_operation(default_return="")
     async def _load_html_template(self) -> str:

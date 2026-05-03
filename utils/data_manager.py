@@ -117,8 +117,9 @@ class DataManager:
         """
         now = time.time()
         
-        # 定期清理过期锁（每 100 次访问清理一次）
-        if len(self._group_locks) > 100 and len(self._group_locks) % 100 == 0:
+        # 定期清理过期锁（每 50 次访问或在锁数量达到阈值时清理）
+        # 修复：使用 >= 100 确保在 100、101、102... 时都会触发清理，避免累积
+        if len(self._group_locks) >= 100 and (len(self._group_lock_access) % 50 == 0 or len(self._group_locks) > 1000):
             expired = [
                 gid for gid, last_access in list(self._group_lock_access.items()) 
                 if now - last_access > self._group_lock_ttl

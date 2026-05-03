@@ -2068,42 +2068,33 @@ class MessageStatsPlugin(Star):
     
     # ========== 辅助方法 ==========
     
-    def _handle_command_exception(self, event: AstrMessageEvent, operation_name: str, exception: Exception) -> bool:
-        """公共的异常处理方法，减少代码重复
-        
+    def _handle_command_exception(self, event: AstrMessageEvent, operation_name: str, exception: Exception) -> None:
+        """公共的异常处理方法
+
+        注意：此方法是同步方法。由于 event.plain_result() 在 async generator 上下文中
+        需要通过 yield 来发送消息，此方法只能记录日志并返回错误字符串供上层 yield。
+        直接调用 event.plain_result() 无法发送消息到聊天中。
+
         Args:
             event: 消息事件对象
             operation_name: 操作名称，用于日志记录
             exception: 异常对象
-            
+
         Returns:
-            bool: 是否成功处理了异常
+            None: 仅记录日志，消息通过返回的字符串由上层 yield 发送
         """
-        try:
-            if isinstance(exception, (KeyError, TypeError)):
-                self.logger.error(f"{operation_name}失败(数据格式错误): {exception}", exc_info=True)
-                event.plain_result(f"{operation_name}失败，请稍后重试")
-                return True
-            elif isinstance(exception, (IOError, OSError, FileNotFoundError)):
-                self.logger.error(f"{operation_name}失败(文件操作错误): {exception}", exc_info=True)
-                event.plain_result(f"{operation_name}失败，请稍后重试")
-                return True
-            elif isinstance(exception, ValueError):
-                self.logger.error(f"{operation_name}失败(参数错误): {exception}", exc_info=True)
-                event.plain_result(f"{operation_name}失败，请稍后重试")
-                return True
-            elif isinstance(exception, RuntimeError):
-                self.logger.error(f"{operation_name}失败(运行时错误): {exception}", exc_info=True)
-                event.plain_result(f"{operation_name}失败，请稍后重试")
-                return True
-            else:
-                self.logger.error(f"{operation_name}失败(未预期的错误类型 {type(exception).__name__}): {exception}", exc_info=True)
-                event.plain_result(f"{operation_name}失败，请稍后重试")
-                return True
-        except (RuntimeError, AttributeError, ValueError, TypeError, KeyError) as handler_error:
-            # 修复：替换过于宽泛的Exception为具体异常类型
-            self.logger.error(f"异常处理器本身出错: {handler_error}", exc_info=True)
-            return False
+        if isinstance(exception, (KeyError, TypeError)):
+            self.logger.error(f"{operation_name}失败(数据格式错误): {exception}", exc_info=True)
+        elif isinstance(exception, (IOError, OSError, FileNotFoundError)):
+            self.logger.error(f"{operation_name}失败(文件操作错误): {exception}", exc_info=True)
+        elif isinstance(exception, ValueError):
+            self.logger.error(f"{operation_name}失败(参数错误): {exception}", exc_info=True)
+        elif isinstance(exception, RuntimeError):
+            self.logger.error(f"{operation_name}失败(运行时错误): {exception}", exc_info=True)
+        elif isinstance(exception, (ConnectionError, asyncio.TimeoutError, ImportError, PermissionError)):
+            self.logger.error(f"{operation_name}失败(网络或系统错误): {exception}", exc_info=True)
+        else:
+            self.logger.error(f"{operation_name}失败(未预期的错误类型 {type(exception).__name__}): {exception}", exc_info=True)
     
     def _log_operation_result(self, operation_name: str, success: bool, details: str = ""):
         """公共的操作结果日志记录方法，减少代码重复

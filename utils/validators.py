@@ -168,22 +168,22 @@ class Validators:
     def validate_nickname(nickname: Any) -> str:
         """验证用户昵称格式
         
-        验证用户昵称是否符合规范，进行长度检查和HTML转义。
+        验证用户昵称是否符合规范，进行长度检查和基本字符过滤。
+        注意：此处不做 HTML 转义，转义将在渲染阶段（图片/文字输出）统一处理。
+        如果在存储时转义，缓存中的数据可能被重复转义导致乱码。
         
         Args:
             nickname (Any): 要验证的昵称，可以是任何类型
             
         Returns:
-            str: 验证并转义后的昵称字符串
+            str: 验证通过后的昵称字符串（原始未转义）
             
         Raises:
-            ValidationError: 当昵称为空、长度超过50字符或包含可疑编码时抛出
+            ValidationError: 当昵称为空或长度超过50字符时抛出
             
         Example:
             >>> Validators.validate_nickname("用户昵称")
             '用户昵称'
-            >>> Validators.validate_nickname("<script>alert('xss')</script>")
-            '&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;'
             >>> Validators.validate_nickname("")  # 抛出异常
         """
         if not nickname:
@@ -197,8 +197,11 @@ class Validators:
         if len(nickname_str) > NICKNAME_MAX_LENGTH:
             raise ValidationError(f"昵称长度不能超过{NICKNAME_MAX_LENGTH}个字符")
         
-        # 使用HTML转义
-        return html.escape(nickname_str)
+        # 移除控制字符（保留正常字符）
+        import re
+        nickname_str = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', nickname_str)
+        
+        return nickname_str
     
     @staticmethod
     def validate_time_format(time_str: str) -> str:
