@@ -701,9 +701,14 @@ class ImageGenerator:
             # 获取 LLM 头衔：优先使用 titles_map，其次 user.display_title
             user_title = None
             if titles_map and user.user_id in titles_map:
-                user_title = titles_map[user.user_id]
+                raw = titles_map[user.user_id]
+                if isinstance(raw, dict):
+                    user_title = raw.get("title")
+                else:
+                    user_title = raw
             elif user.display_title:
                 user_title = user.display_title
+
             
             if user_title:
                 self.logger.info(f"头衔数据: {user.nickname} -> 「{user_title}」")
