@@ -952,12 +952,14 @@ class ImageGenerator:
         # 根据当前用户状态选择合适的排名样式类
         rank_class = "rank-current" if item_data['is_current_user'] else "rank"
         
-        # 获取头衔
+        # 获取头衔和颜色
         user_title_raw = item_data.get('title', None) or item_data.get('safe_content', {}).get('title', None)
+        user_title_color_raw = item_data.get('title_color', None) or item_data.get('safe_content', {}).get('title_color', None)
         user_title_html = ""
         if user_title_raw:
             safe_title = html.escape(str(user_title_raw))
-            user_title_html = f'<div class="user-title" style="font-size:13px;font-weight:700;padding:0px 8px;border-radius:10px;display:inline-block;margin-left:8px;vertical-align:middle;line-height:24px;">「{safe_title}」</div>'
+            safe_title_color = html.escape(str(user_title_color_raw)) if user_title_color_raw else '#7C3AED'
+            user_title_html = f'<div class="user-title" style="color:{safe_title_color};background:{safe_title_color}22;font-size:13px;font-weight:700;padding:0px 8px;border-radius:10px;display:inline-block;margin-left:8px;vertical-align:middle;line-height:24px;">「{safe_title}」</div>'
         
         html_parts = [
             f'<div class="{css_classes["item"]}" style="{safe_separator_style}">',

@@ -5,7 +5,7 @@
     <img class="avatar" src="{{ item_data.safe_content.avatar_url }}" style="border-color: {{ item_data.styles.avatar_border }};" />
     <div class="info">
         <div class="name-date">
-            <div class="nickname-row" style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px;min-width:0;">
+            <div class="nickname-row" style="display:flex;align-items:center;gap:10px;margin-bottom:6px;min-width:0;">
                 <div class="nickname{% if item_data.safe_content.title %} nickname-with-title{% endif %}" title="{{ item_data.safe_content.nickname }}">{{ item_data.safe_content.nickname }}</div>
                 {% if item_data.safe_content.title %}
                 <div class="user-title" style="font-size:13px;font-weight:700;padding:0px 8px;border-radius:10px;letter-spacing:0.5px;white-space:nowrap;flex-shrink:0;display:inline-block;vertical-align:middle;line-height:24px;">「{{ item_data.safe_content.title }}」</div>

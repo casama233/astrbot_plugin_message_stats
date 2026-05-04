@@ -762,12 +762,15 @@ class TimerManager:
             if not self.image_generator:
                 return None
             
-            # 从users中提取titles_map（已经由_patch_to_group设置好了display_title）
-            # 构造titles_map给图片生成器
+            # 从users中提取titles_map（已经由_push_to_group设置好了display_title和display_title_color）
+            # 构造包含颜色信息的titles_map给图片生成器
             titles_map = {}
             for user in users:
                 if user.display_title:
-                    titles_map[user.user_id] = user.display_title
+                    if user.display_title_color:
+                        titles_map[user.user_id] = {"title": user.display_title, "color": user.display_title_color}
+                    else:
+                        titles_map[user.user_id] = user.display_title
             
             # 使用图片生成器生成图片
             temp_path = await self.image_generator.generate_rank_image(

@@ -1310,11 +1310,11 @@ class MessageStatsPlugin(Star):
                         
                         grp_name = group_info.group_name or f"群{group_id}"
                         
-                        # 重要：需要过滤出真正在本次展示列表中的用户传递给LLM分析
-                        # 以免分析了没上榜的人，浪费token
-                        # 但是 group_data 里包含了所有人
+                        # 只分析排行榜上实际显示的用户（与 config.rand 绑定）
+                        # 未上榜的用户生成的头衔不会显示，分析纯属浪费 Token
+                        ranked_users_for_llm = [user for user, _ in filtered_data[:config.rand]]
                         titles, token_usage = await llm_analyzer.analyze_users(
-                            group_data, grp_name, min_daily_messages=min_daily
+                            ranked_users_for_llm, grp_name, min_daily_messages=min_daily
                         )
                         
                         if token_usage and token_usage.get("total_tokens", 0) > 0:

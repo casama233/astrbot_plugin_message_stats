@@ -8,6 +8,8 @@
 
 ### 🐛 Bug 修复
 
+- **修复定时推送头衔颜色丢失（严重）**：`_generate_rank_image()` 构造 `titles_map` 时只取了 `display_title` 纯字符串，丢弃了 `display_title_color`。导致定时推送的排行榜图片中所有 LLM 生成的头衔颜色退化为默认紫色。已修复：构建 `titles_map` 时同时携带 `color` 字段。
+
 - **修复 LLM 头衔不显示的问题**：`_parse_titles()` 传入的是用户昵称，但后续渲染需要 user_id，导致头衔无法匹配到用户。已改为昵称→user_id 映射后再解析头衔。
 
 - **修复头衔显示为字典字符串的问题**：LLM 返回的 `{"title": "...", "color": "..."}` 字典格式未被解析，直接显示为字符串。已修复：`_process_user_data_batch()` 中正确提取 `title` 和 `color` 字段。
@@ -16,7 +18,19 @@
 
 - **修复头衔徽章垂直不对齐**：`.nickname-row` 使用 `align-items: baseline` 导致 24px 昵称和 13px 头衔徽章按基线对齐，头衔偏下。已改为 `align-items: center` 居中。
 
-- **修复 `titles_map` 变量未定义错误**：`_show_rank()` 中 `titles_map` 只在 LLM 分支中定义，LLM 禁用时引用未定义变量。已在分支前声明 `titles_map = None`。
+- **修复液态玻璃主题头徽章垂直不对齐（修复遗漏）**：v1.8.7 只修复了 `rank_template.html`，漏掉了 `rank_template_liquid_glass.html`、`rank_template_liquid_glass_dark.html` 和 `user_item_macro.html` 三个模板。已统一将 `align-items: baseline` 改为 `align-items: center`。
+
+- **LLM 分析范围与排行榜显示人数绑定**：手动查询排行榜时，LLM 只分析排行榜实际显示的用户（即 config.rand 指定的数量），不再分析全群有发言记录的用户，避免 Token 浪费。
+
+- **修复暗色主题 CSS 类样式与 inline style 冲突**：`rank_template_liquid_glass_dark.html` 的 `.user-title` CSS 类中 `color` 和 `background` 写死，可能造成 FOUC。已移除硬编码颜色，颜色完全由 inline style 控制。
+
+- **修复 Fallback 渲染路径忽略头衔颜色**：当 Jinja2 不可用时，fallback 路径的头衔样式完全硬编码，未使用 `title_color`。已修复：fallback 路径也动态渲染头衔颜色。
+
+- **修复 `metadata.yaml` 版本号不一致**：`metadata.yaml` 版本仍为 `1.8.6`，已同步更新至 `1.8.7`。
+
+### 🔧 其他改进
+
+- **优化 Web 面板配置文案**：里程碑次数列表提示去掉方括号改用顿号分隔；LLM 提示词模板描述更清晰。
 
 ## v1.8.5 (2026-05-04)
 
