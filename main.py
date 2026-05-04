@@ -104,6 +104,14 @@ class MessageStatsPlugin(Star):
             config (AstrBotConfig): AstrBot配置的插件配置对象,通过Web界面设置
         """
         super().__init__(context)
+        
+        # 注册 plugin pages API
+        context.register_web_api(
+            "/astrbot_plugin_message_stats/stats",
+            self.page_stats,
+            ["GET"],
+            "发言统计面板数据",
+        )
         self.logger = astrbot_logger
         
         # 使用StarTools获取插件数据目录
@@ -134,6 +142,8 @@ class MessageStatsPlugin(Star):
         
         # 定时任务管理器 - 延迟初始化
         self.timer_manager = None
+        from quart import jsonify
+        self._jsonify = jsonify
     def _load_unified_msg_origins(self):
         """从文件加载持久化的 unified_msg_origin 映射表"""
         try:
@@ -158,6 +168,39 @@ class MessageStatsPlugin(Star):
             self.logger.debug(f"保存 unified_msg_origin 文件失败: {e}")
 
     
+    async def page_stats(self):
+        try:
+            from quart import request
+            gid = request.args.get('group_id') if request else None
+            if gid:
+                users = await self.data_manager.get_group_data(gid)
+                if not users:
+                    return self._jsonify({"status":"ok","data":{"group":None}})
+                act = [u for u in users if u.message_count>0]
+                act.sort(key=lambda x:x.message_count,reverse=True)
+                tm = sum(u.message_count for u in act)
+                tu = []
+                for u in act[:self.plugin_config.rand]:
+                    p = (u.message_count/tm*100) if tm>0 else 0
+                    tu.append({"nickname":u.nickname,"message_count":u.message_count,"title":u.display_title or "","last_date":u.last_date or "","percentage":round(p,1)})
+                return self._jsonify({"status":"ok","data":{"group":{"group_id":gid,"group_name":f"群{gid}","total_messages":tm,"user_count":len(act),"top_users":tu}}})
+            gd = []
+            ag = await self.data_manager.get_all_groups()
+            for g2 in ag[:50]:
+                us = await self.data_manager.get_group_data(g2)
+                if not us: continue
+                ac = [u for u in us if u.message_count>0]
+                ac.sort(key=lambda x:x.message_count,reverse=True)
+                gd.append({"group_id":g2,"group_name":f"群{g2}","total_messages":sum(u.message_count for u in ac),"user_count":len(ac)})
+            ts = None
+            if self.timer_manager:
+                s = await self.timer_manager.get_status()
+                ts = {"running":s["status"]=="running","next_push":str(s.get("next_push_time","") or "")}
+            c = self.plugin_config
+            return self._jsonify({"status":"ok","data":{"groups":gd,"config":{"rand":c.rand,"if_send_pic":c.if_send_pic},"timer":ts}})
+        except Exception as e:
+            return self._jsonify({"status":"error","message":str(e)})
+
     def _convert_to_plugin_config(self) -> PluginConfig:
         """将AstrBot配置转换为插件配置对象"""
         try:
@@ -415,9 +458,13 @@ class MessageStatsPlugin(Star):
         except (ImportError, OSError, IOError) as e:
             self.logger.warning(f"定时任务管理器初始化失败: {e}")
             self.timer_manager = None
+        from quart import jsonify
+        self._jsonify = jsonify
         except (RuntimeError, AttributeError, ValueError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
             self.logger.warning(f"定时任务管理器初始化失败(运行时错误): {e}")
             self.timer_manager = None
+        from quart import jsonify
+        self._jsonify = jsonify
     
     async def _setup_caches(self):
         """设置缓存和最终初始化状态
