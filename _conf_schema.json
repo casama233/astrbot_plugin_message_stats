@@ -129,10 +129,12 @@
     "hint": "选择用于生成头衔的 LLM Provider。留空则使用当前会话的默认 Provider"
   },
   "llm_system_prompt": {
-    "type": "string",
-    "description": "LLM 提示词（可选）",
-    "hint": "发给LLM的提示词，用于指导头衔生成风格。留空使用默认提示词。",
-    "default": ""
+    "type": "text",
+    "description": "LLM 提示词模板",
+    "hint": "发给LLM的提示词，用于控制头衔生成风格和JSON格式。如果留空则使用插件内置的默认提示词。",
+    "default": "",
+    "editor_mode": true,
+    "editor_language": "markdown"
   },
   "llm_max_retries": {
     "type": "int",
@@ -144,5 +146,22 @@
       "max": 5,
       "step": 1
     }
+  },
+  "llm_min_daily_messages": {
+    "type": "int",
+    "description": "每日发言次数最小值（头衔分析）",
+    "hint": "只有当日发言次数达到此值的用户，LLM才会为其生成头衔。设为0则分析所有有发言的用户。",
+    "default": 0,
+    "slider": {
+      "min": 0,
+      "max": 100,
+      "step": 5
+    }
+  },
+  "llm_enable_on_manual": {
+    "type": "bool",
+    "description": "手动查询时也启用LLM分析",
+    "hint": "开启后，使用发言榜、今日发言榜等手动命令时也会调用LLM生成头衔（注意会产生Token消耗）",
+    "default": false
   }
 }
