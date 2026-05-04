@@ -137,7 +137,7 @@ class ImageGenerator:
         
         if auto_switch:
             # 自动根据时间切换主题
-            theme = self._get_auto_theme()
+            theme = self._get_auto_theme(theme)
             self.logger.info(f"自动主题切换已启用，当前时间匹配主题: {theme}")
         
         template_map = {
@@ -149,14 +149,19 @@ class ImageGenerator:
         self.template_path = self._templates_dir / template_file
         self.logger.info(f"使用排行榜主题: {theme}, 模板: {template_file}")
     
-    def _get_auto_theme(self) -> str:
+    def _get_auto_theme(self, base_theme: str) -> str:
         """根据当前时间自动选择合适的主题
         
         根据 auto_theme_switch 配置中的 light/dark 切换时间，
         判断当前应该使用浅色主题还是深色主题。
+        浅色时段使用用户配置的主题（如 liquid_glass），
+        深色时段固定使用 liquid_glass_dark。
         
+        Args:
+            base_theme: 用户配置的浅色主题名称
+            
         Returns:
-            str: 主题名称，'default'（浅色）或 'liquid_glass_dark'（深色）
+            str: 主题名称，浅色时段返回 base_theme，深色时段返回 'liquid_glass_dark'
         """
         try:
             switch_times = getattr(self.config, 'theme_switch_times', {"light": "06:00", "dark": "18:00"})
@@ -175,14 +180,14 @@ class ImageGenerator:
             
             # 判断当前时间段
             if light_minutes <= current_minutes < dark_minutes:
-                # 浅色时间段：使用 default 主题
-                return 'default'
+                # 浅色时间段：使用用户配置的浅色主题
+                return base_theme
             else:
-                # 深色时间段：使用 liquid_glass_dark 主题
+                # 深色时间段：使用液态玻璃深色主题
                 return 'liquid_glass_dark'
         except (ValueError, AttributeError, KeyError, TypeError) as e:
             self.logger.warning(f"自动主题切换时间解析失败，使用默认主题: {e}")
-            return 'default'
+            return base_theme
     
 
     
