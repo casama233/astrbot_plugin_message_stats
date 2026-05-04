@@ -416,8 +416,19 @@ class ImageGenerator:
                                  users: List[UserData], 
                                  group_info: GroupInfo, 
                                  title: str,
-                                 current_user_id: Optional[str] = None) -> str:
-        """生成排行榜图片（懒加载浏览器，用完即关）"""
+                                 current_user_id: Optional[str] = None,
+                                 llm_token_usage: Dict[str, int] = None,
+                                 titles_map: Optional[Dict[str, str]] = None) -> str:
+        """生成排行榜图片（懒加载浏览器，用完即关）
+        
+        Args:
+            users: 用户数据列表（已按发言数降序排列）
+            group_info: 群组信息
+            title: 排行榜标题
+            current_user_id: 当前用户ID，用于高亮显示
+            llm_token_usage: LLM token使用统计
+            titles_map: 用户ID到头衔的映射字典 {user_id: title}
+        """
         # 每次生成图片时重新检查主题（支持自动主题切换实时生效）
         self._update_template_path()
         
@@ -434,8 +445,8 @@ class ImageGenerator:
             # 设置视口
             await page.set_viewport_size({"width": self.width, "height": self.viewport_height})
             
-            # 生成HTML内容
-            html_content = await self._generate_html(users, group_info, title, current_user_id)
+            # 生成HTML内容（显式传入头衔映射）
+            html_content = await self._generate_html(users, group_info, title, current_user_id, llm_token_usage, titles_map)
             
             # 设置页面内容（使用 load 而非 networkidle，避免外部资源加载超时）
             await page.set_content(html_content, wait_until="load")
@@ -455,6 +466,7 @@ class ImageGenerator:
             await page.screenshot(path=temp_path, full_page=True)
             
             return str(temp_path)
+
         
         except FileNotFoundError as e:
             self.logger.error(f"临时文件或资源未找到: {e}")
@@ -612,13 +624,24 @@ class ImageGenerator:
                       users: List[UserData], 
                       group_info: GroupInfo, 
                       title: str,
-                      current_user_id: Optional[str] = None) -> str:
-        """生成HTML内容（优化版本）"""
+                      current_user_id: Optional[str] = None,
+                      llm_token_usage: Dict[str, int] = None,
+                      titles_map: Optional[Dict[str, str]] = None) -> str:
+        """生成HTML内容
+        
+        Args:
+            users: 用户数据列表
+            group_info: 群组信息
+            title: 排行榜标题
+            current_user_id: 当前用户ID，用于高亮显示
+            llm_token_usage: LLM token使用统计
+            titles_map: 用户ID到头衔的映射字典 {user_id: title}
+        """
         if not users:
             return await self._generate_empty_html(group_info, title)
         
-        # 使用批量处理优化性能
-        processed_data = self._process_user_data_batch(users, current_user_id)
+        # 使用批量处理优化性能（显式传入头衔映射）
+        processed_data = self._process_user_data_batch(users, current_user_id, titles_map)
         
         # 计算统计数据
         total_messages = processed_data['total_messages']
@@ -630,44 +653,65 @@ class ImageGenerator:
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         # 准备模板数据（使用字典构建优化）
+        llm_token_text = ""
+        if llm_token_usage and llm_token_usage.get("total_tokens", 0) > 0:
+            llm_token_text = f"LLM Token 消耗: {llm_token_usage.get('total_tokens', 0)} (输入{llm_token_usage.get('prompt_tokens', 0)}+输出{llm_token_usage.get('completion_tokens', 0)})"
+        
         template_data = {
             'group_name': self._escape_html_safe(group_info.group_name or f"群{group_info.group_id}"),
             'group_id': self._escape_html_safe(str(group_info.group_id)),
             'title': self._escape_html_safe(title),
             'total_messages': self._escape_html_safe(str(total_messages)),
             'user_count': self._escape_html_safe(str(len(users))),
-            'current_time': self._escape_html_safe(current_time)
+            'current_time': self._escape_html_safe(current_time),
+            'llm_token_info': self._escape_html_safe(llm_token_text) if llm_token_text else ""
         }
         
         # 生成HTML内容（优化渲染逻辑）
         return await self._render_html_template(html_template, template_data, processed_data['user_items'])
     
-    def _process_user_data_batch(self, users: List[UserData], current_user_id: Optional[str]) -> Dict[str, Any]:
-        """批量处理用户数据，优化性能"""
+    def _process_user_data_batch(self, users: List[UserData], current_user_id: Optional[str], 
+                                  titles_map: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        """批量处理用户数据，优化性能
+        
+        Args:
+            users: 用户数据列表
+            current_user_id: 当前用户ID，用于高亮显示
+            titles_map: 用户ID到头衔的映射字典 {user_id: title}
+                      优先使用此参数中的头衔，若无则回退到 user.display_title
+        """
         if not users:
             return {'total_messages': 0, 'user_items': []}
         
         # 预计算统计数据 - 使用时间段内的发言数
-        total_messages = sum(getattr(user, 'display_total', user.message_count) for user in users)
+        total_messages = sum(user.display_total if user.display_total is not None else user.message_count for user in users)
         
         # 批量生成用户项目
         user_items = []
         current_user_found = False
         
-        # 使用列表推导式优化性能
         for i, user in enumerate(users):
             is_current_user = current_user_id and user.user_id == current_user_id
             if is_current_user:
                 current_user_found = True
             
             # 使用时间段内的发言数
-            user_messages = getattr(user, 'display_total', user.message_count)
-            # 获取 LLM 生成的头衔（从 user_data 的 display_title 属性获取）
-            user_title = getattr(user, 'display_title', None) or getattr(user, 'title', None)
+            user_messages = user.display_total if user.display_total is not None else user.message_count
+            
+            # 获取 LLM 头衔：优先使用 titles_map，其次 user.display_title
+            user_title = None
+            if titles_map and user.user_id in titles_map:
+                user_title = titles_map[user.user_id]
+            elif user.display_title:
+                user_title = user.display_title
+            
+            if user_title:
+                self.logger.info(f"头衔数据: {user.nickname} -> 「{user_title}」")
+            
             user_items.append({
                 'rank': i + 1,
                 'nickname': user.nickname,
-                'title': user_title if user_title else None,
+                'title': user_title,
                 'avatar_url': self._get_avatar_url(user.user_id, "qq"),
                 'total': user_messages,
                 'percentage': (user_messages / total_messages * 100) if total_messages > 0 else 0,
@@ -680,9 +724,8 @@ class ImageGenerator:
         if current_user_id and not current_user_found:
             current_user_data = next((user for user in users if user.user_id == current_user_id), None)
             if current_user_data:
-                # 使用时间段内的发言数计算排名
-                current_user_messages = getattr(current_user_data, 'display_total', current_user_data.message_count)
-                current_rank = sum(1 for user in users if getattr(user, 'display_total', user.message_count) > current_user_messages) + 1
+                current_user_messages = current_user_data.display_total if current_user_data.display_total is not None else current_user_data.message_count
+                current_rank = sum(1 for user in users if (user.display_total if user.display_total is not None else user.message_count) > current_user_messages) + 1
                 user_items.append({
                     'rank': current_rank,
                     'nickname': current_user_data.nickname,
@@ -698,6 +741,7 @@ class ImageGenerator:
             'total_messages': total_messages,
             'user_items': user_items
         }
+
     
     async def _render_html_template(self, template_content: str, template_data: Dict[str, Any], user_items: List[Dict[str, Any]]) -> str:
         """优化的HTML模板渲染方法"""
@@ -899,14 +943,21 @@ class ImageGenerator:
         # 根据当前用户状态选择合适的排名样式类
         rank_class = "rank-current" if item_data['is_current_user'] else "rank"
         
+        # 获取头衔
+        user_title_raw = item_data.get('title', None) or item_data.get('safe_content', {}).get('title', None)
+        user_title_html = ""
+        if user_title_raw:
+            safe_title = html.escape(str(user_title_raw))
+            user_title_html = f'<div class="user-title" style="font-size:13px;color:#7C3AED;font-weight:700;background:#EDE9FE;padding:2px 8px;border-radius:10px;display:inline-block;margin-left:8px;line-height:1.4;">「{safe_title}」</div>'
+        
         html_parts = [
             f'<div class="{css_classes["item"]}" style="{safe_separator_style}">',
             f'    <div class="{rank_class}">#{item_data["rank"]}</div>',
             f'    <img class="avatar" src="{safe_avatar_url}" style="border-color: {safe_avatar_border};" />',
             '    <div class="info">',
             '        <div class="name-date">',
-            f'            <div class="nickname">{safe_nickname}</div>',
-            f'            <div class="date">最近发言: {safe_last_date}</div>',
+            f'            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;"><span class="nickname" style="font-size:24px;font-weight:600;color:#1F2937;line-height:1.3;">{safe_nickname}</span>{user_title_html}</div>',
+            f'            <div class="date" style="color:#6B7280;font-size:15px;">最近发言: {safe_last_date}</div>',
             '        </div>',
             '        <div class="stats">',
             f'            <div class="count">{item_data["total"]} 次</div>',
@@ -938,15 +989,24 @@ class ImageGenerator:
         safe_last_date = self._escape_html_safe(str(item_data.get('last_date', '未知')))
         safe_avatar_url = self._validate_url_safe(str(item_data.get('avatar_url', '')))
         
+        # 处理头衔转义
+        title = item_data.get('title', None)
+        safe_title = self._escape_html_safe(str(title)) if title else None
+        
         # 如果头像URL无效，使用默认头像
         if not safe_avatar_url:
             safe_avatar_url = self._get_avatar_url(str(item_data.get('user_id', '0')), "qq")
         
-        return {
+        content = {
             'nickname': safe_nickname,
             'last_date': safe_last_date,
             'avatar_url': safe_avatar_url
         }
+        
+        if safe_title:
+            content['title'] = safe_title
+            
+        return content
 
     def _escape_html_safe(self, text: str) -> str:
         """安全的HTML转义"""
@@ -1171,6 +1231,23 @@ class ImageGenerator:
             font-weight: bold;
             color: #1F2937;
         }
+        .nickname-with-title {
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .user-title {
+            font-size: 12px;
+            color: #7C3AED;
+            font-weight: 700;
+            background: #EDE9FE;
+            padding: 2px 6px;
+            border-radius: 10px;
+            white-space: nowrap;
+            flex-shrink: 0;
+            margin-left: 6px;
+        }
         .date {
             font-size: 14px;
             color: #6B7280;
@@ -1189,6 +1266,12 @@ class ImageGenerator:
             font-size: 14px;
             color: #6B7280;
         }
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #6B7280;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -1196,6 +1279,11 @@ class ImageGenerator:
     <div class="title">{{ title }}</div>
     <div class="user-list">
         {{ user_items }}
+    </div>
+    <div class="footer">
+        <p>🤖 由 AstrBot 发言统计插件生成</p>
+        <p>生成时间: {{ current_time }}</p>
+        {{ llm_token_info }}
     </div>
 </body>
 </html>"""

@@ -642,12 +642,15 @@ class TimerManager:
         await self._refresh_nickname_cache_for_timer_push(group_id, group_data)
         
         # 如果启用了 LLM 头衔分析，先调用 LLM 生成头衔
+        token_usage_info = None
+        titles_map = None
         if config.llm_enabled:
             try:
                 # 使用 AstrBot 内部 Provider 系统调用 LLM
                 provider_id = getattr(config, 'llm_provider_id', '')
                 system_prompt = getattr(config, 'llm_system_prompt', '')
                 max_retries = getattr(config, 'llm_max_retries', 2)
+                min_daily = getattr(config, 'llm_min_daily_messages', 0)
                 
                 llm_analyzer = LLMAnalyzer(
                     context=self.context,
@@ -658,25 +661,38 @@ class TimerManager:
                 
                 # 获取群组名称用于提示词
                 grp_name = await self._get_group_name(group_id)
-                titles = await llm_analyzer.analyze_users(group_data, grp_name)
+                titles, token_usage = await llm_analyzer.analyze_users(
+                    group_data, grp_name, min_daily_messages=min_daily
+                )
+                
+                if token_usage and token_usage.get("total_tokens", 0) > 0:
+                    token_usage_info = token_usage
                 
                 if titles:
                     self.logger.info(f"✅ LLM 头衔生成成功: 为 {len(titles)} 个用户生成了头衔")
-                    # 将头衔设置到用户数据的 display_title 属性
+                    titles_map = titles
                     for user in group_data:
                         if user.user_id in titles:
-                            user.display_title = titles[user.user_id]
+                            info = titles[user.user_id]
+                            if isinstance(info, dict):
+                                user.display_title = info.get("title")
+                                user.display_title_color = info.get("color")
+                            else:
+                                user.display_title = info
+
                 else:
                     self.logger.warning("⚠️ LLM 头衔生成结果为空，将使用不带头衔的排行榜")
             except Exception as e:
                 self.logger.error(f"❌ LLM 头衔生成异常: {e}", exc_info=True)
                 self.logger.info("将使用不带头衔的排行榜继续推送")
+
         
         # 根据排行榜类型筛选数据
         # 定时推送强制使用今日排行榜
         rank_type = RankType.DAILY
         filtered_data = await self._filter_data_by_rank_type(group_data, rank_type)
         if not filtered_data:
+
             # 今日无数据（如凌晨推送），回退到昨日数据
             yesterday = datetime.now().date() - timedelta(days=1)
             filtered_data = [(user, user.get_message_count_in_period(yesterday, yesterday)) for user in group_data if user.get_message_count_in_period(yesterday, yesterday) > 0]
@@ -712,7 +728,7 @@ class TimerManager:
         title = self._generate_title(rank_type)
         
         # 定时推送只发送图片版本
-        image_path = await self._generate_rank_image(users_for_rank, group_info, title, config)
+        image_path = await self._generate_rank_image(users_for_rank, group_info, title, config, token_usage_info)
         if not image_path:
             self.logger.warning(f"群组 {group_id} 图片生成失败")
             return False
@@ -730,7 +746,7 @@ class TimerManager:
         return success
     
     @safe_generation(default_return=None)
-    async def _generate_rank_image(self, users: List[UserData], group_info: GroupInfo, title: str, config) -> Optional[str]:
+    async def _generate_rank_image(self, users: List[UserData], group_info: GroupInfo, title: str, config, token_usage: Dict[str, int] = None) -> Optional[str]:
         """生成排行榜图片
         
         Args:
@@ -746,12 +762,20 @@ class TimerManager:
             if not self.image_generator:
                 return None
             
+            # 从users中提取titles_map（已经由_patch_to_group设置好了display_title）
+            # 构造titles_map给图片生成器
+            titles_map = {}
+            for user in users:
+                if user.display_title:
+                    titles_map[user.user_id] = user.display_title
+            
             # 使用图片生成器生成图片
             temp_path = await self.image_generator.generate_rank_image(
-                users, group_info, title, "0"  # 系统推送，用户ID设为"0"
+                users, group_info, title, "0", token_usage, titles_map  # 系统推送，用户ID设为"0"
             )
             
             return temp_path
+
             
         except Exception as e:
             self.logger.error(f"生成排行榜图片失败: {e}")
