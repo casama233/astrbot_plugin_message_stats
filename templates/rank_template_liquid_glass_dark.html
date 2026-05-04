@@ -404,7 +404,7 @@
                             <div class="nickname-row">
                                 <div class="nickname{% if item.title %} nickname-with-title{% endif %}" title="{{ item.nickname }}">{{ item.nickname }}</div>
                                 {% if item.title %}
-                                <div class="user-title">「{{ item.title }}」</div>
+                                <div class="user-title" style="color:{{ item.title_color or '#7C3AED' }};background:{{ (item.title_color or '#7C3AED') + '22' }};">「{{ item.title }}」</div>
                                 {% endif %}
                             </div>
                             <div class="date">最近发言: {{ item.last_date }}</div>

@@ -700,14 +700,17 @@ class ImageGenerator:
             
             # 获取 LLM 头衔：优先使用 titles_map，其次 user.display_title
             user_title = None
+            user_title_color = None
             if titles_map and user.user_id in titles_map:
                 raw = titles_map[user.user_id]
                 if isinstance(raw, dict):
                     user_title = raw.get("title")
+                    user_title_color = raw.get("color")
                 else:
                     user_title = raw
             elif user.display_title:
                 user_title = user.display_title
+                user_title_color = user.display_title_color
 
             
             if user_title:
@@ -717,6 +720,7 @@ class ImageGenerator:
                 'rank': i + 1,
                 'nickname': user.nickname,
                 'title': user_title,
+                'title_color': user_title_color,
                 'avatar_url': self._get_avatar_url(user.user_id, "qq"),
                 'total': user_messages,
                 'percentage': (user_messages / total_messages * 100) if total_messages > 0 else 0,
@@ -953,7 +957,7 @@ class ImageGenerator:
         user_title_html = ""
         if user_title_raw:
             safe_title = html.escape(str(user_title_raw))
-            user_title_html = f'<div class="user-title" style="font-size:13px;color:#7C3AED;font-weight:700;background:#EDE9FE;padding:0px 8px;border-radius:10px;display:inline-block;margin-left:8px;vertical-align:middle;line-height:24px;">「{safe_title}」</div>'
+            user_title_html = f'<div class="user-title" style="font-size:13px;font-weight:700;padding:0px 8px;border-radius:10px;display:inline-block;margin-left:8px;vertical-align:middle;line-height:24px;">「{safe_title}」</div>'
         
         html_parts = [
             f'<div class="{css_classes["item"]}" style="{safe_separator_style}">',
