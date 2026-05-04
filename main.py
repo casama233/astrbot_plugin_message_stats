@@ -8,7 +8,9 @@ import asyncio
 import os
 import re
 import aiofiles
+import json
 from datetime import datetime, date, timedelta
+from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 # AstrBot框架导入
@@ -117,6 +119,9 @@ class MessageStatsPlugin(Star):
         
         # 群组unified_msg_origin映射表 - 用于主动消息发送
         self.group_unified_msg_origins = {}
+        # unified_msg_origin持久化文件（重启后自动恢复）
+        self._umo_file = Path(data_dir) / "unified_msg_origins.json"
+        self._load_unified_msg_origins()
         
         # 成员缓存管理器 - 管理群成员列表缓存和用户昵称缓存
         # 使用分层缓存策略（昵称缓存 → 字典缓存 → API获取），
@@ -129,6 +134,29 @@ class MessageStatsPlugin(Star):
         
         # 定时任务管理器 - 延迟初始化
         self.timer_manager = None
+    def _load_unified_msg_origins(self):
+        """从文件加载持久化的 unified_msg_origin 映射表"""
+        try:
+            if self._umo_file.exists():
+                import json
+                with open(str(self._umo_file), 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    self.group_unified_msg_origins = data
+                    self.logger.info(f"已加载 unified_msg_origin 映射表: {len(data)} 条记录")
+        except Exception as e:
+            self.logger.debug(f"加载 unified_msg_origin 文件失败: {e}")
+
+    def _save_unified_msg_origins(self):
+        """将 unified_msg_origin 映射表保存到文件"""
+        try:
+            self._umo_file.parent.mkdir(parents=True, exist_ok=True)
+            import json
+            with open(str(self._umo_file), 'w', encoding='utf-8') as f:
+                json.dump(self.group_unified_msg_origins, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.logger.debug(f"保存 unified_msg_origin 文件失败: {e}")
+
     
     def _convert_to_plugin_config(self) -> PluginConfig:
         """将AstrBot配置转换为插件配置对象"""
@@ -192,6 +220,9 @@ class MessageStatsPlugin(Star):
                 # 同时以 unified_msg_origin 本身作为键存储
                 # 这样无论 timer_target_groups 中填的是群号还是 unified_msg_origin 都能匹配
                 self.group_unified_msg_origins[unified_msg_origin] = unified_msg_origin
+                
+                # 持久化到文件（重启后自动恢复）
+                self._save_unified_msg_origins()
                 
                 if old_origin != unified_msg_origin:
                     self.logger.info(f"已收集群组 {group_id} 的 unified_msg_origin")
@@ -421,7 +452,6 @@ class MessageStatsPlugin(Star):
                         missing_groups = [g for g in self.plugin_config.timer_target_groups if g not in self.group_unified_msg_origins]
                         if missing_groups:
                             self.logger.info(f"缺少unified_msg_origin的群组: {missing_groups}")
-                            self.logger.info("💡 提示: 在这些群组中发送任意消息以收集unified_msg_origin")
             except (ImportError, AttributeError, RuntimeError) as e:
                 self.logger.warning(f"定时任务启动失败: {e}")
                 # 不影响插件的正常使用
@@ -859,6 +889,13 @@ class MessageStatsPlugin(Star):
             
             # 使用框架标准的 image_result 返回图片
             yield event.image_result(image_path)
+            
+            # 清理临时图片文件
+            if await aiofiles.os.path.exists(image_path):
+                try:
+                    await aiofiles.os.unlink(image_path)
+                except OSError as e:
+                    self.logger.warning(f"清理里程碑临时图片失败: {image_path}, 错误: {e}")
                     
         except Exception as e:
             self.logger.error(f"里程碑获取失败: {e}", exc_info=True)
