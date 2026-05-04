@@ -106,14 +106,6 @@ class MessageStatsPlugin(Star):
         super().__init__(context)
         self.logger = astrbot_logger
         
-        # 注册 plugin pages API
-        context.register_web_api(
-            "/astrbot_plugin_message_stats/stats",
-            self.page_stats,
-            ["GET"],
-            "发言统计面板数据",
-        )
-        
         # 使用StarTools获取插件数据目录
         data_dir = StarTools.get_data_dir('message_stats')
         
@@ -142,8 +134,6 @@ class MessageStatsPlugin(Star):
         
         # 定时任务管理器 - 延迟初始化
         self.timer_manager = None
-        from quart import jsonify
-        self._jsonify = jsonify
     def _load_unified_msg_origins(self):
         """从文件加载持久化的 unified_msg_origin 映射表"""
         try:
@@ -168,44 +158,6 @@ class MessageStatsPlugin(Star):
             self.logger.debug(f"保存 unified_msg_origin 文件失败: {e}")
 
     
-    async def page_stats(self):
-        """返回排行榜统计数据给 plugin pages"""
-        try:
-            groups_data = []
-            all_group_ids = await self.data_manager.get_all_groups()
-            for gid in all_group_ids[:50]:
-                users = await self.data_manager.get_group_data(gid)
-                if not users:
-                    continue
-                active = [u for u in users if u.message_count > 0]
-                active.sort(key=lambda x: x.message_count, reverse=True)
-                total_msgs = sum(u.message_count for u in active)
-                top_users = []
-                for u in active[:self.plugin_config.rand]:
-                    top_users.append({"nickname": u.nickname, "message_count": u.message_count})
-                groups_data.append({
-                    "group_id": gid,
-                    "group_name": f"群{gid}",
-                    "total_messages": total_msgs,
-                    "user_count": len(active),
-                    "top_users": top_users,
-                })
-            timer_status = None
-            if self.timer_manager:
-                s = await self.timer_manager.get_status()
-                timer_status = {"running": s["status"] == "running", "next_push": str(s.get("next_push_time", "") or "")}
-            config = self.plugin_config
-            return self._jsonify({
-                "status": "ok",
-                "data": {
-                    "groups": groups_data,
-                    "config": {"rand": config.rand, "if_send_pic": config.if_send_pic},
-                    "timer": timer_status,
-                }
-            })
-        except Exception as e:
-            return self._jsonify({"status": "error", "message": str(e)})
-
     def _convert_to_plugin_config(self) -> PluginConfig:
         """将AstrBot配置转换为插件配置对象"""
         try:
