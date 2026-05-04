@@ -141,6 +141,14 @@ class MessageStatsPlugin(Star):
             # 确保config是字典类型
             config_dict = dict(self.config) if hasattr(self.config, 'items') else {}
             
+            # 强制覆写 llm_system_prompt：如果用户配置的是空白/旧格式，
+            # 直接用新版默认提示词覆盖，确保带颜色的提示词生效
+            llm_prompt = config_dict.get("llm_system_prompt", "")
+            if not llm_prompt or not llm_prompt.strip():
+                from .llm_analyzer import DEFAULT_SYSTEM_PROMPT
+                config_dict["llm_system_prompt"] = DEFAULT_SYSTEM_PROMPT
+
+            
             # 兼容处理：将Web面板中的 theme_switch_light_time / theme_switch_dark_time 
             # 合并到 theme_switch_times 字典中
             if 'theme_switch_light_time' in config_dict or 'theme_switch_dark_time' in config_dict:
