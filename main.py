@@ -56,7 +56,7 @@ from .utils.constants import (
     GROUP_MEMBERS_CACHE_TTL as CACHE_TTL_SECONDS
 )
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.8.5")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.8.7")
 class MessageStatsPlugin(Star):
     """群发言统计插件
     
@@ -1289,6 +1289,7 @@ class MessageStatsPlugin(Star):
             
             # 如果启用了手动LLM分析，调用LLM生成头衔
             token_usage_info = None
+            titles_map = None
             need_llm = config.llm_enabled and config.llm_enable_on_manual
             if need_llm:
                 try:

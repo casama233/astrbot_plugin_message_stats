@@ -965,7 +965,7 @@ class ImageGenerator:
             f'    <img class="avatar" src="{safe_avatar_url}" style="border-color: {safe_avatar_border};" />',
             '    <div class="info">',
             '        <div class="name-date">',
-            f'            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px;"><span class="nickname" style="font-size:24px;font-weight:600;color:#1F2937;line-height:1.3;">{safe_nickname}</span>{user_title_html}</div>',
+            f'            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><span class="nickname" style="font-size:24px;font-weight:600;color:#1F2937;line-height:1.3;">{safe_nickname}</span>{user_title_html}</div>',
             f'            <div class="date" style="color:#6B7280;font-size:15px;">最近发言: {safe_last_date}</div>',
             '        </div>',
             '        <div class="stats">',
