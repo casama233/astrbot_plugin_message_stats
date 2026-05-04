@@ -202,6 +202,14 @@ class UserData:
     # 按天聚合的字典 {date_str: count}，替代 history 列表存储
     # 10万条消息最多365个键值对，内存占用从O(n)降到O(365)
     _message_dates: Dict[str, int] = field(default_factory=dict)
+    # LLM 生成的头衔文本（运行时属性，不会持久化到文件）
+    display_title: Optional[str] = None
+    # LLM 生成的头衔颜色（运行时属性），如 "#EF4444"
+    display_title_color: Optional[str] = None
+    # 时间段内的发言数（运行时属性，仅用于图片生成，不会持久化到文件）
+    display_total: Optional[int] = None
+
+
     
     def add_message(self, message_date: MessageDate):
         """添加消息记录
@@ -409,6 +417,16 @@ class PluginConfig:
         # 发言里程碑推送配置
         self.milestone_enabled = False
         self.milestone_targets = [666, 1000, 2333, 5000, 6666, 10000, 23333]
+        
+        # LLM 头衔分析配置
+        self.llm_enabled = False
+        self.llm_provider_id = ""
+        self.llm_system_prompt = ""
+        self.llm_max_retries = 2
+        self.llm_min_daily_messages = 0
+        self.llm_enable_on_manual = False
+        # 提示词版本号，版本升级时自动覆写
+        self.llm_prompt_version = ""
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典
@@ -448,7 +466,14 @@ class PluginConfig:
             "blocked_users": self.blocked_users,
             "blocked_groups": self.blocked_groups,
             "milestone_enabled": self.milestone_enabled,
-            "milestone_targets": self.milestone_targets
+            "milestone_targets": self.milestone_targets,
+            "llm_enabled": self.llm_enabled,
+            "llm_provider_id": self.llm_provider_id,
+            "llm_system_prompt": self.llm_system_prompt,
+            "llm_max_retries": self.llm_max_retries,
+            "llm_min_daily_messages": self.llm_min_daily_messages,
+            "llm_enable_on_manual": self.llm_enable_on_manual,
+            "llm_prompt_version": self.llm_prompt_version
         }
     
     @classmethod
@@ -516,6 +541,15 @@ class PluginConfig:
         config.blocked_groups = data.get("blocked_groups", [])
         config.milestone_enabled = data.get("milestone_enabled", False)
         config.milestone_targets = data.get("milestone_targets", [666, 1000, 2333, 5000, 6666, 10000, 23333])
+        
+        # LLM 头衔分析配置
+        config.llm_enabled = data.get("llm_enabled", False)
+        config.llm_provider_id = data.get("llm_provider_id", "")
+        config.llm_system_prompt = data.get("llm_system_prompt", "")
+        config.llm_max_retries = data.get("llm_max_retries", 2)
+        config.llm_min_daily_messages = data.get("llm_min_daily_messages", 0)
+        config.llm_enable_on_manual = data.get("llm_enable_on_manual", False)
+        config.llm_prompt_version = data.get("llm_prompt_version", "")
         
         return config
 

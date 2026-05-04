@@ -1,12 +1,44 @@
 # 更新日志
 
+## v1.8.7 (2026-05-04)
+
+### ✨ 新功能
+
+- **LLM 头衔配色大师**：LLM 现在可以为每个用户的头衔指定独特的配色（`color` 字段），头衔徽章会动态显示对应的颜色和背景色，告别单一的紫色样式。
+
+### 🐛 Bug 修复
+
+- **修复定时推送头衔颜色丢失（严重）**：`_generate_rank_image()` 构造 `titles_map` 时只取了 `display_title` 纯字符串，丢弃了 `display_title_color`。导致定时推送的排行榜图片中所有 LLM 生成的头衔颜色退化为默认紫色。已修复：构建 `titles_map` 时同时携带 `color` 字段。
+
+- **修复 LLM 头衔不显示的问题**：`_parse_titles()` 传入的是用户昵称，但后续渲染需要 user_id，导致头衔无法匹配到用户。已改为昵称→user_id 映射后再解析头衔。
+
+- **修复头衔显示为字典字符串的问题**：LLM 返回的 `{"title": "...", "color": "..."}` 字典格式未被解析，直接显示为字符串。已修复：`_process_user_data_batch()` 中正确提取 `title` 和 `color` 字段。
+
+- **修复头衔颜色硬编码**：模板中 `color: #7C3AED` 和 `background: #EDE9FE` 写死，LLM 返回的颜色不生效。已改为动态 `{{ item.title_color }}` 渲染。
+
+- **修复头衔徽章垂直不对齐**：`.nickname-row` 使用 `align-items: baseline` 导致 24px 昵称和 13px 头衔徽章按基线对齐，头衔偏下。已改为 `align-items: center` 居中。
+
+- **修复液态玻璃主题头徽章垂直不对齐（修复遗漏）**：v1.8.7 只修复了 `rank_template.html`，漏掉了 `rank_template_liquid_glass.html`、`rank_template_liquid_glass_dark.html` 和 `user_item_macro.html` 三个模板。已统一将 `align-items: baseline` 改为 `align-items: center`。
+
+- **LLM 分析范围与排行榜显示人数绑定**：手动查询排行榜时，LLM 只分析排行榜实际显示的用户（即 config.rand 指定的数量），不再分析全群有发言记录的用户，避免 Token 浪费。
+
+- **修复暗色主题 CSS 类样式与 inline style 冲突**：`rank_template_liquid_glass_dark.html` 的 `.user-title` CSS 类中 `color` 和 `background` 写死，可能造成 FOUC。已移除硬编码颜色，颜色完全由 inline style 控制。
+
+- **修复 Fallback 渲染路径忽略头衔颜色**：当 Jinja2 不可用时，fallback 路径的头衔样式完全硬编码，未使用 `title_color`。已修复：fallback 路径也动态渲染头衔颜色。
+
+- **修复 `metadata.yaml` 版本号不一致**：`metadata.yaml` 版本仍为 `1.8.6`，已同步更新至 `1.8.7`。
+
+### 🔧 其他改进
+
+- **优化 Web 面板配置文案**：里程碑次数列表提示去掉方括号改用顿号分隔；LLM 提示词模板描述更清晰。
+
 ## v1.8.5 (2026-05-04)
 
 ### 🐛 Bug 修复
 
 - **修复 `_handle_command_exception()` 缺少 `yield` 关键字**：`event.plain_result()` 是生成器方法，直接调用无法发送消息到聊天中。已将方法重构为仅记录日志，避免静默失败。
 
-- **修复昵称双重 HTML 转义导致显示乱码**：`validate_nickname()` 原本使用 `html.escape()` 转义后存储，渲染图片时又再次转义，导致昵称出现 `&lt;` 等双重转义乱码。已修复：存储时不再做 HTML 转义，统一在渲染阶段进行一次转义。
+- **修复昵称双重 HTML 转义导致显示乱码**：`validate_nickname()` 原本使用 `html.escape()` 转义后存储，渲染图片时又再次转义，导致昵称出现 `<` 等双重转义乱码。已修复：存储时不再做 HTML 转义，统一在渲染阶段进行一次转义。
 
 - **修复 `_get_avatar_url()` 处理 Telegram 负数用户 ID 时的潜在崩溃**：`int(user_id) % 5` 对负数字符串 ID 直接 `int()` 转换可能抛出异常。现已改用 `abs(int(user_id))` 取绝对值，并添加 `ValueError`/`TypeError` 兜底处理。
 

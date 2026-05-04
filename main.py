@@ -23,6 +23,7 @@ from .utils.image_generator import ImageGenerator, ImageGenerationError
 from .utils.validators import Validators
 from .utils.platform_helper import PlatformHelper
 from .utils.member_cache_manager import MemberCacheManager
+from .utils.llm_analyzer import LLMAnalyzer
 
 from .utils.models import (
     UserData, PluginConfig, GroupInfo, MessageDate, 
@@ -55,7 +56,7 @@ from .utils.constants import (
     GROUP_MEMBERS_CACHE_TTL as CACHE_TTL_SECONDS
 )
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.8.5")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.8.7")
 class MessageStatsPlugin(Star):
     """群发言统计插件
     
@@ -1286,9 +1287,59 @@ class MessageStatsPlugin(Star):
             
             group_id, current_user_id, filtered_data, config, title, group_info = rank_data
             
+            # 如果启用了手动LLM分析，调用LLM生成头衔
+            token_usage_info = None
+            titles_map = None
+            need_llm = config.llm_enabled and config.llm_enable_on_manual
+            if need_llm:
+                try:
+                    # 获取群组数据用于LLM分析
+                    group_data = await self.data_manager.get_group_data(group_id)
+                    if group_data:
+                        provider_id = getattr(config, 'llm_provider_id', '')
+                        system_prompt = getattr(config, 'llm_system_prompt', '')
+                        max_retries = getattr(config, 'llm_max_retries', 2)
+                        min_daily = getattr(config, 'llm_min_daily_messages', 0)
+                        
+                        llm_analyzer = LLMAnalyzer(
+                            context=self.context,
+                            provider_id=provider_id,
+                            system_prompt=system_prompt,
+                            max_retries=max_retries
+                        )
+                        
+                        grp_name = group_info.group_name or f"群{group_id}"
+                        
+                        # 只分析排行榜上实际显示的用户（与 config.rand 绑定）
+                        # 未上榜的用户生成的头衔不会显示，分析纯属浪费 Token
+                        ranked_users_for_llm = [user for user, _ in filtered_data[:config.rand]]
+                        titles, token_usage = await llm_analyzer.analyze_users(
+                            ranked_users_for_llm, grp_name, min_daily_messages=min_daily
+                        )
+                        
+                        if token_usage and token_usage.get("total_tokens", 0) > 0:
+                            token_usage_info = token_usage
+                        
+                        if titles:
+                            self.logger.info(f"✅ 手动LLM头衔生成成功: 为 {len(titles)} 个用户生成了头衔")
+                            # 保存头衔映射，同时设置到 user.display_title
+                            titles_map = titles
+                            for user_data_item, _ in filtered_data:
+                                if user_data_item.user_id in titles:
+                                    info = titles[user_data_item.user_id]
+                                    if isinstance(info, dict):
+                                        user_data_item.display_title = info.get("title")
+                                        user_data_item.display_title_color = info.get("color")
+                                    else:
+                                        user_data_item.display_title = info
+
+                except Exception as e:
+                    self.logger.error(f"❌ 手动LLM头衔生成异常: {e}", exc_info=True)
+            
             # 根据配置选择显示模式
             if config.if_send_pic:
-                async for result in self._render_rank_as_image(event, filtered_data, group_info, title, current_user_id, config):
+                async for result in self._render_rank_as_image(event, filtered_data, group_info, title, current_user_id, config, token_usage_info, titles_map):
+
                     yield result
             else:
                 async for result in self._render_rank_as_text(event, filtered_data, group_info, title, config):
@@ -1407,7 +1458,9 @@ class MessageStatsPlugin(Star):
             self.logger.warning(f"排行榜前刷新昵称缓存失败: {e}")
 
     async def _render_rank_as_image(self, event: AstrMessageEvent, filtered_data: List[tuple], 
-                                  group_info: GroupInfo, title: str, current_user_id: str, config: PluginConfig):
+                                  group_info: GroupInfo, title: str, current_user_id: str, config: PluginConfig,
+                                  llm_token_usage: Dict[str, int] = None,
+                                  titles_map: Optional[Dict[str, str]] = None):
         """渲染排行榜为图片模式"""
         temp_path = None
         try:
@@ -1423,10 +1476,11 @@ class MessageStatsPlugin(Star):
                 user_data.display_total = count
                 users_for_image.append(user_data)
             
-            # 使用图片生成器
+            # 使用图片生成器（传入titles_map）
             temp_path = await self.image_generator.generate_rank_image(
-                users_for_image, group_info, title, current_user_id
+                users_for_image, group_info, title, current_user_id, llm_token_usage, titles_map
             )
+
             
             # 检查图片文件是否存在
             if await aiofiles.os.path.exists(temp_path):

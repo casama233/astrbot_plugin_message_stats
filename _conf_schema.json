@@ -100,7 +100,8 @@
     "type": "list",
     "item_type": "int",
     "description": "里程碑次数列表",
-    "hint": "触发推送的发言次数里程碑，如 [666, 1000, 5000, 10000]",
+    "hint": "触发推送的发言次数里程碑，如 666、1000、5000、10000",
+
     "default": [666, 1000, 2333, 5000, 6666, 10000, 23333]
   },
   "blocked_users": {
@@ -114,5 +115,54 @@
     "description": "屏蔽群聊列表",
     "hint": "屏蔽指定群聊，使其不统计发言数据且无法使用排行榜指令。请输入完整的群组ID（QQ群号或Telegram群组ID）。",
     "default": []
+  },
+  "llm_enabled": {
+    "type": "bool",
+    "description": "启用 LLM 发言头衔分析",
+    "hint": "开启后，定时推送排行榜时将使用LLM根据发言数据为每个成员生成个性化头衔",
+    "default": false
+  },
+  "llm_provider_id": {
+    "type": "string",
+    "description": "LLM Provider ID",
+    "_special": "select_provider",
+    "default": "",
+    "hint": "选择用于生成头衔的 LLM Provider。留空则使用当前会话的默认 Provider"
+  },
+  "llm_system_prompt": {
+    "type": "text",
+    "description": "头衔生成提示词",
+    "hint": "用于控制头衔生成风格颜色和JSON格式，留空则使用默认模板。",
+    "default": "你是一个擅长给群成员起有趣头衔的群聊分析师，也是一个配色大师。\n请根据以下群成员的发言统计数据，为每个成员生成一个富有创意、幽默且贴合其发言风格的头衔，并为每个头衔搭配一个合适的颜色。\n\n要求：\n1. 头衔要简短（不超过6个汉字），朗朗上口\n2. 结合数据特征（发言总数、排名、活跃天数等）进行创意发挥\n3. 风格可以多样：霸气、搞怪、吐槽、中二均可\n4. 不要使用侮辱性词汇\n5. 对发言最多的前3名给出更夸张、更酷的头衔\n6. 为每个头衔搭配一个颜色，颜色要契合头衔的气质含义，例如：红色（#EF4444）代表热情霸气，蓝色（#3B82F6）代表沉稳冷静，紫色（#8B5CF6）代表神秘高贵，绿色（#22C55E）代表生机活力，橙色（#F97316）代表欢乐活泼，粉色（#EC4899）代表可爱温柔，青色（#06B6D4）代表清新灵动\n\n请严格按照以下JSON格式返回，不要包含任何其他内容：\n```json\n{\n  \"titles\": {\n    \"用户ID_1\": {\n      \"title\": \"头衔1\",\n      \"color\": \"#3B82F6\"\n    },\n    \"用户ID_2\": {\n      \"title\": \"头衔2\",\n      \"color\": \"#EF4444\"\n    }\n  }\n}\n```",
+    "editor_mode": true,
+    "editor_language": "markdown"
+  },
+  "llm_max_retries": {
+    "type": "int",
+    "description": "LLM 重试次数",
+    "hint": "LLM调用失败时的重试次数",
+    "default": 2,
+    "slider": {
+      "min": 0,
+      "max": 5,
+      "step": 1
+    }
+  },
+  "llm_min_daily_messages": {
+    "type": "int",
+    "description": "每日发言次数最小值（头衔分析）",
+    "hint": "只有当日发言次数达到此值的用户，LLM才会为其生成头衔。设为0则分析所有有发言的用户。",
+    "default": 0,
+    "slider": {
+      "min": 0,
+      "max": 100,
+      "step": 5
+    }
+  },
+  "llm_enable_on_manual": {
+    "type": "bool",
+    "description": "手动查询时也启用LLM分析",
+    "hint": "开启后，使用发言榜、今日发言榜等手动命令时也会调用LLM生成头衔（注意会产生Token消耗）",
+    "default": false
   }
 }
