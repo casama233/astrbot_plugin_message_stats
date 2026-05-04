@@ -953,7 +953,7 @@ class ImageGenerator:
         user_title_html = ""
         if user_title_raw:
             safe_title = html.escape(str(user_title_raw))
-            user_title_html = f'<div class="user-title" style="font-size:13px;color:#7C3AED;font-weight:700;background:#EDE9FE;padding:2px 8px;border-radius:10px;display:inline-block;margin-left:8px;line-height:1.4;">「{safe_title}」</div>'
+            user_title_html = f'<div class="user-title" style="font-size:13px;color:#7C3AED;font-weight:700;background:#EDE9FE;padding:0px 8px;border-radius:10px;display:inline-block;margin-left:8px;vertical-align:middle;line-height:24px;">「{safe_title}」</div>'
         
         html_parts = [
             f'<div class="{css_classes["item"]}" style="{safe_separator_style}">',
