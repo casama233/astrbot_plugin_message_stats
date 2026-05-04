@@ -425,6 +425,8 @@ class PluginConfig:
         self.llm_max_retries = 2
         self.llm_min_daily_messages = 0
         self.llm_enable_on_manual = False
+        # 提示词版本号，版本升级时自动覆写
+        self.llm_prompt_version = ""
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典
@@ -470,7 +472,8 @@ class PluginConfig:
             "llm_system_prompt": self.llm_system_prompt,
             "llm_max_retries": self.llm_max_retries,
             "llm_min_daily_messages": self.llm_min_daily_messages,
-            "llm_enable_on_manual": self.llm_enable_on_manual
+            "llm_enable_on_manual": self.llm_enable_on_manual,
+            "llm_prompt_version": self.llm_prompt_version
         }
     
     @classmethod
@@ -546,6 +549,7 @@ class PluginConfig:
         config.llm_max_retries = data.get("llm_max_retries", 2)
         config.llm_min_daily_messages = data.get("llm_min_daily_messages", 0)
         config.llm_enable_on_manual = data.get("llm_enable_on_manual", False)
+        config.llm_prompt_version = data.get("llm_prompt_version", "")
         
         return config
 
