@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>发言统计面板</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5; color: #333; padding: 20px;
+        }
+        h1 { font-size: 24px; margin-bottom: 20px; }
+        .card { background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .card h2 { font-size: 16px; color: #666; margin-bottom: 12px; }
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .stat-item { text-align: center; padding: 12px; background: #f8f9fa; border-radius: 8px; }
+        .stat-item .num { font-size: 28px; font-weight: 700; color: #3B82F6; }
+        .stat-item .label { font-size: 12px; color: #999; margin-top: 4px; }
+        .rank-item { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #f0f0f0; }
+        .rank-item:last-child { border-bottom: none; }
+        .rank-num { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; color: #fff; margin-right: 12px; }
+        .rank-1 { background: #F59E0B; }
+        .rank-2 { background: #9CA3AF; }
+        .rank-3 { background: #8B5CF6; }
+        .rank-other { background: #3B82F6; }
+        .rank-info { flex: 1; }
+        .rank-info .name { font-size: 15px; font-weight: 600; }
+        .rank-info .count { font-size: 13px; color: #666; }
+        .loading { text-align: center; padding: 40px; color: #999; }
+        .note { font-size: 12px; color: #999; text-align: center; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>📊 发言统计面板</h1>
+    <div id="content"><div class="loading">加载中...</div></div>
+    <script>
+        async function loadData() {
+            const groups = localStorage.getItem('astrbot_msg_stats');
+            if (groups) {
+                try { render(JSON.parse(groups)); } catch(e) {}
+            }
+            try {
+                const r = await fetch('/api/v1/plugins/astrbot_plugin_message_stats/rank_data');
+                const d = await r.json();
+                if (d.status === 'ok' && d.data) {
+                    localStorage.setItem('astrbot_msg_stats', JSON.stringify(d.data));
+                    render(d.data);
+                }
+            } catch(e) {
+                if (!groups) document.getElementById('content').innerHTML = '<div class="loading">请先配置 API 路由</div>';
+            }
+        }
+        function render(d) {
+            const groups = d.groups || [];
+            const totalUsers = groups.reduce((s, g) => s + (g.user_count || 0), 0);
+            const totalMsgs = groups.reduce((s, g) => s + (g.total_messages || 0), 0);
+            let html = '<div class="card"><h2>📈 总览</h2><div class="stat-grid">';
+            html += `<div class="stat-item"><div class="num">${groups.length}</div><div class="label">群组数</div></div>`;
+            html += `<div class="stat-item"><div class="num">${totalUsers}</div><div class="label">用户数</div></div>`;
+            html += `<div class="stat-item"><div class="num">${totalMsgs}</div><div class="label">总发言</div></div>`;
+            html += `<div class="stat-item"><div class="num">${d.config?.rand || 20}</div><div class="label">排行人数</div></div>`;
+            html += '</div></div>';
+            for (const g of groups) {
+                html += '<div class="card">';
+                html += `<h2>👥 ${g.group_name || '群' + g.group_id} <span style="font-weight:400;color:#999;font-size:13px;">${g.total_messages}条</span></h2>`;
+                const users = g.top_users || [];
+                for (let i = 0; i < users.length; i++) {
+                    const cls = i < 3 ? `rank-${i+1}` : 'rank-other';
+                    html += `<div class="rank-item"><div class="rank-num ${cls}">${i+1}</div>`;
+                    html += `<div class="rank-info"><div class="name">${users[i].nickname}</div>`;
+                    html += `<div class="count">${users[i].message_count} 次</div></div></div>`;
+                }
+                html += '</div>';
+            }
+            html += '<div class="note">数据来自插件缓存，可能不是实时数据</div>';
+            document.getElementById('content').innerHTML = html;
+        }
+        loadData();
+    </script>
+</body>
+</html>
