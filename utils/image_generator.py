@@ -433,6 +433,12 @@ class ImageGenerator:
             current_user_id: 当前用户ID，用于高亮显示
             llm_token_usage: LLM token使用统计
             titles_map: 用户ID到头衔的映射字典 {user_id: title}
+            
+        Returns:
+            str: 生成的临时图片路径
+            
+        Raises:
+            ImageGenerationError: 图片生成失败时抛出
         """
         # 每次生成图片时重新检查主题（支持自动主题切换实时生效）
         self._update_template_path()
@@ -442,6 +448,7 @@ class ImageGenerator:
         
         temp_path = None
         page = None
+        success = False
         
         try:
             # 创建局部页面变量，防止并发时互相覆盖（开启两倍高清渲染）
@@ -470,6 +477,7 @@ class ImageGenerator:
             # 截图
             await page.screenshot(path=temp_path, full_page=True)
             
+            success = True
             return str(temp_path)
 
         
@@ -489,6 +497,7 @@ class ImageGenerator:
             raise ImageGenerationError(f"生成图片失败: {e}")
         
         finally:
+            # 清理资源
             if page:
                 try:
                     await page.close()
@@ -498,8 +507,13 @@ class ImageGenerator:
             # 生成完毕后关闭浏览器释放内存
             await self._close_browser()
             
-            # 注意：不在这里删除临时文件，让调用方负责清理
-            # 以避免在返回路径后立即删除文件的问题
+            # 清理临时文件：如果生成失败，删除已创建的临时文件避免积累
+            if not success and temp_path and temp_path.exists():
+                try:
+                    await aiofiles.os.unlink(str(temp_path))
+                    self.logger.debug(f"已清理失败的临时文件: {temp_path}")
+                except Exception as e:
+                    self.logger.warning(f"清理临时文件失败: {e}")
     
     @safe_generation(default_return=None)
     async def generate_milestone_image(self,
@@ -536,6 +550,8 @@ class ImageGenerator:
         await self._ensure_browser()
         
         page = None
+        temp_path = None
+        success = False
         try:
             # 创建局部页面变量（里程碑卡片使用较窄的视口，开启两倍高清渲染）
             page = await self.browser.new_page(device_scale_factor=2)
@@ -598,6 +614,7 @@ class ImageGenerator:
             # 截图
             await page.screenshot(path=temp_path, full_page=True)
             
+            success = True
             return str(temp_path)
         
         except FileNotFoundError as e:
@@ -623,6 +640,14 @@ class ImageGenerator:
             
             # 生成完毕后关闭浏览器释放内存
             await self._close_browser()
+            
+            # 清理临时文件：如果生成失败，删除已创建的临时文件避免积累
+            if not success and temp_path and temp_path.exists():
+                try:
+                    await aiofiles.os.unlink(str(temp_path))
+                    self.logger.debug(f"已清理失败的里程碑临时文件: {temp_path}")
+                except Exception as e:
+                    self.logger.warning(f"清理里程碑临时文件失败: {e}")
     
     @safe_generation(default_return="")
     async def _generate_html(self, 
