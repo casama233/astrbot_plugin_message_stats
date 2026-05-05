@@ -8,7 +8,7 @@
     "theme": {
       "description": "排行榜主题风格",
       "hint": "图片显示排行榜的主题风格（启用自动主题切换后此设置将被覆盖）",
-      "labels": ["默认", "液态玻璃", "液态玻璃黑暗"]
+      "labels": ["default", "liquid_glass", "liquid_glass_dark"]
     },
     "auto_theme_switch": {
       "description": "自动主题切换",
