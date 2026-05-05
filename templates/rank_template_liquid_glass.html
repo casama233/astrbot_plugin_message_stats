@@ -395,7 +395,11 @@
                 <div class="{{ 'user-item-current' if item.is_current_user else 'user-item' }}"
                     style="{{ 'margin-top: 20px; border-top: 2px dashed #bdc3c7;' if item.is_separator else '' }}">
                     <div class="rank-number" style="color: #3B82F6; font-weight: bold; font-size: 36px;">#{{ item.rank }}</div>
+                    {% if item.avatar_url %}
+                    <img class="avatar" src="{{ item.avatar_url }}" style="border-color: #ffffff; border-width: 3px; border-style: solid;" />
+                    {% else %}
                     <div class="avatar" style="background:{{ item.avatar_color or '#3B82F6' }};width:75px;height:75px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:700;margin:0 30px;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,0.15);text-shadow:0 1px 3px rgba(0,0,0,0.3);border:3px solid #ffffff;">{{ item.avatar_char or '?' }}</div>
+                    {% endif %}
                     <div class="info">
                         <div class="name-date">
                             <div class="nickname-row">

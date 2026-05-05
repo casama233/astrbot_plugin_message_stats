@@ -789,11 +789,13 @@ class ImageGenerator:
             if user_title:
                 self.logger.info(f"头衔数据: {user.nickname} -> 「{user_title}」")
             
+            avatar_url = self._get_avatar_url(user.user_id, "qq")
             user_items.append({
                 'rank': i + 1,
                 'nickname': user.nickname,
                 'title': user_title,
                 'title_color': user_title_color,
+                'avatar_url': avatar_url,
                 'avatar_color': self._get_avatar_color(user.nickname),
                 'avatar_char': self._get_avatar_char(user.nickname),
                 'total': user_messages,
