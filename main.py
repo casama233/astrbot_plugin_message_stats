@@ -8,7 +8,9 @@ import asyncio
 import os
 import re
 import aiofiles
+import json
 from datetime import datetime, date, timedelta
+from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 # AstrBot框架导入
@@ -56,7 +58,7 @@ from .utils.constants import (
     GROUP_MEMBERS_CACHE_TTL as CACHE_TTL_SECONDS
 )
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.8.7")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.0")
 class MessageStatsPlugin(Star):
     """群发言统计插件
     
@@ -102,6 +104,20 @@ class MessageStatsPlugin(Star):
             config (AstrBotConfig): AstrBot配置的插件配置对象,通过Web界面设置
         """
         super().__init__(context)
+        
+        # 注册 plugin pages API
+        context.register_web_api(
+            "/astrbot_plugin_message_stats/stats",
+            self.page_stats,
+            ["GET"],
+            "发言统计面板数据",
+        )
+        context.register_web_api(
+            "/astrbot_plugin_message_stats/delete",
+            self.page_delete,
+            ["GET"],
+            "删除群组发言数据",
+        )
         self.logger = astrbot_logger
         
         # 使用StarTools获取插件数据目录
@@ -117,6 +133,15 @@ class MessageStatsPlugin(Star):
         
         # 群组unified_msg_origin映射表 - 用于主动消息发送
         self.group_unified_msg_origins = {}
+        # unified_msg_origin持久化文件（重启后自动恢复）
+        self._umo_file = Path(data_dir) / "unified_msg_origins.json"
+        self._load_unified_msg_origins()
+        
+        # 群组名称持久化存储 (group_id -> group_name)
+        # 由 _cache_group_name（有event时）写入，Web页面直接读取
+        self._group_names_file = Path(data_dir) / "group_names.json"
+        self._web_group_name_cache: Dict[str, str] = {}
+        self._load_group_names()
         
         # 成员缓存管理器 - 管理群成员列表缓存和用户昵称缓存
         # 使用分层缓存策略（昵称缓存 → 字典缓存 → API获取），
@@ -129,7 +154,115 @@ class MessageStatsPlugin(Star):
         
         # 定时任务管理器 - 延迟初始化
         self.timer_manager = None
+        from quart import jsonify
+        self._jsonify = jsonify
+    def _load_unified_msg_origins(self):
+        """从文件加载持久化的 unified_msg_origin 映射表"""
+        try:
+            if self._umo_file.exists():
+                import json
+                with open(str(self._umo_file), 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    self.group_unified_msg_origins = data
+                    self.logger.info(f"已加载 unified_msg_origin 映射表: {len(data)} 条记录")
+        except Exception as e:
+            self.logger.debug(f"加载 unified_msg_origin 文件失败: {e}")
+
+    def _save_unified_msg_origins(self):
+        """将 unified_msg_origin 映射表保存到文件"""
+        try:
+            self._umo_file.parent.mkdir(parents=True, exist_ok=True)
+            import json
+            with open(str(self._umo_file), 'w', encoding='utf-8') as f:
+                json.dump(self.group_unified_msg_origins, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.logger.debug(f"保存 unified_msg_origin 文件失败: {e}")
+
+    def _load_group_names(self):
+        """从文件加载持久化的群组名称缓存"""
+        try:
+            if self._group_names_file.exists():
+                import json
+                with open(str(self._group_names_file), 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    self._web_group_name_cache = data
+                    self.logger.info(f"已加载群组名称缓存: {len(data)} 条记录")
+        except Exception as e:
+            self.logger.debug(f"加载群组名称文件失败: {e}")
+
+    def _save_group_names(self):
+        """将群组名称持久化到文件"""
+        try:
+            self._group_names_file.parent.mkdir(parents=True, exist_ok=True)
+            import json
+            with open(str(self._group_names_file), 'w', encoding='utf-8') as f:
+                json.dump(self._web_group_name_cache, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.logger.debug(f"保存群组名称文件失败: {e}")
     
+    async def page_stats(self):
+        try:
+            from quart import request
+            import os
+            gid = request.args.get('group_id') if request else None
+            if gid:
+                users = await self.data_manager.get_group_data(gid)
+                if not users:
+                    return self._jsonify({"status":"ok","data":{"group":None}})
+                act = [u for u in users if u.message_count>0]
+                act.sort(key=lambda x:x.message_count,reverse=True)
+                tm = sum(u.message_count for u in act)
+                tu = []
+                for u in act[:self.plugin_config.rand]:
+                    pct = (u.message_count/tm*100) if tm>0 else 0
+                    tu.append({"nickname":u.nickname,"message_count":u.message_count,"title":u.display_title or "","last_date":u.last_date or "","percentage":round(pct,1)})
+                fp2 = self.data_manager.groups_dir / f"{gid}.json"
+                fs2 = ""
+                if fp2.exists():
+                    s2 = os.path.getsize(str(fp2))
+                    fs2 = f"{s2/1024:.1f}KB" if s2<1024*1024 else f"{s2/1024/1024:.1f}MB"
+                gn = self._web_group_name_cache.get(str(gid), f"群{gid}")
+                return self._jsonify({"status":"ok","data":{"group":{"group_id":gid,"group_name":gn,"display_name":f"{gn} - {gid}","file_size":fs2,"total_messages":tm,"user_count":len(act),"top_users":tu}}})
+            gd = []
+            ag = await self.data_manager.get_all_groups()
+            for g2 in ag[:50]:
+                us = await self.data_manager.get_group_data(g2)
+                if not us: continue
+                ac = [u for u in us if u.message_count>0]
+                ac.sort(key=lambda x:x.message_count,reverse=True)
+                fp = self.data_manager.groups_dir / f"{g2}.json"
+                fs = ""
+                if fp.exists():
+                    s = os.path.getsize(str(fp))
+                    fs = f"{s/1024:.1f}KB" if s<1024*1024 else f"{s/1024/1024:.1f}MB"
+                gn = self._web_group_name_cache.get(str(g2), f"群{g2}")
+                gd.append({"group_id":g2,"group_name":gn,"display_name":f"{gn} - {g2}","file_size":fs,"total_messages":sum(u.message_count for u in ac),"user_count":len(ac)})
+            ts = None
+            if self.timer_manager:
+                s = await self.timer_manager.get_status()
+                ts = {"running":s["status"]=="running","next_push":str(s.get("next_push_time","") or "")}
+            c = self.plugin_config
+            return self._jsonify({"status":"ok","data":{"groups":gd,"config":{"rand":c.rand,"if_send_pic":c.if_send_pic},"timer":ts}})
+        except Exception as e:
+            return self._jsonify({"status":"error","message":str(e)})
+    
+    async def page_delete(self):
+        """Web API: 删除群组数据"""
+        try:
+            from quart import request
+            gid = request.args.get('group_id') if request else None
+            if not gid:
+                return self._jsonify({"status":"error","message":"缺少group_id参数"})
+            ok = await self.data_manager.clear_group_data(gid)
+            if ok:
+                self.logger.info(f"Web面板删除群组数据: {gid}")
+                return self._jsonify({"status":"ok","message":"已删除"})
+            return self._jsonify({"status":"error","message":"删除失败"})
+        except Exception as e:
+            return self._jsonify({"status":"error","message":str(e)})
+
     def _convert_to_plugin_config(self) -> PluginConfig:
         """将AstrBot配置转换为插件配置对象"""
         try:
@@ -193,11 +326,11 @@ class MessageStatsPlugin(Star):
                 # 这样无论 timer_target_groups 中填的是群号还是 unified_msg_origin 都能匹配
                 self.group_unified_msg_origins[unified_msg_origin] = unified_msg_origin
                 
+                # 持久化到文件（重启后自动恢复）
+                self._save_unified_msg_origins()
+                
                 if old_origin != unified_msg_origin:
                     self.logger.info(f"已收集群组 {group_id} 的 unified_msg_origin")
-                    
-                    # 尝试获取并缓存群组名称
-                    await self._cache_group_name(event, group_id_str)
                     
                     # 如果定时任务正在运行且需要此群组，更新配置
                     if self.timer_manager:
@@ -230,23 +363,35 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"收集群组unified_msg_origin失败: {e}")
         except (RuntimeError, OSError, IOError, ImportError, ValueError) as e:
             self.logger.error(f"收集群组unified_msg_origin失败(系统错误): {e}")
-    async def _cache_group_name(self, event: AstrMessageEvent, group_id: str):
+    async def _cache_group_name(self, event: Optional[AstrMessageEvent], group_id: str):
         """获取并缓存群组名称（跨平台通用）
         
         使用 PlatformHelper 统一获取群组名称，支持所有平台。
+        同时更新 Web 页面缓存并持久化到文件，供 page_stats 直接读取。
+        
+        每次生成发言榜時都重新获取群名，群改名后立即同步。
         
         Args:
-            event: 消息事件对象
+            event: 消息事件对象（可为 None，此时尝试从 context 获取 API 客户端）
             group_id: 群组ID
         """
         try:
+            group_id_str = str(group_id)
+            
             # 使用 PlatformHelper 统一获取群组名称（跨平台通用）
             helper = PlatformHelper(event, self.context)
             group_name = await helper.get_group_name(group_id)
             
-            # 如果获取到群名，更新缓存
+            # 如果获取到群名，更新所有缓存
             if group_name:
-                self.logger.info(f"已获取群组 {group_id} 的名称: {group_name}")
+                group_name = str(group_name).strip()
+                
+                # 只在群名发生变化时才保存和日志
+                old_name = self._web_group_name_cache.get(group_id_str)
+                if old_name != group_name:
+                    self._web_group_name_cache[group_id_str] = group_name
+                    self._save_group_names()
+                    self.logger.info(f"已获取群组 {group_id} 的名称: {group_name}")
                 
                 # 更新到 timer_manager 的内存缓存
                 if self.timer_manager:
@@ -421,7 +566,6 @@ class MessageStatsPlugin(Star):
                         missing_groups = [g for g in self.plugin_config.timer_target_groups if g not in self.group_unified_msg_origins]
                         if missing_groups:
                             self.logger.info(f"缺少unified_msg_origin的群组: {missing_groups}")
-                            self.logger.info("💡 提示: 在这些群组中发送任意消息以收集unified_msg_origin")
             except (ImportError, AttributeError, RuntimeError) as e:
                 self.logger.warning(f"定时任务启动失败: {e}")
                 # 不影响插件的正常使用
@@ -859,6 +1003,13 @@ class MessageStatsPlugin(Star):
             
             # 使用框架标准的 image_result 返回图片
             yield event.image_result(image_path)
+            
+            # 清理临时图片文件
+            if await aiofiles.os.path.exists(image_path):
+                try:
+                    await aiofiles.os.unlink(image_path)
+                except OSError as e:
+                    self.logger.warning(f"清理里程碑临时图片失败: {image_path}, 错误: {e}")
                     
         except Exception as e:
             self.logger.error(f"里程碑获取失败: {e}", exc_info=True)
@@ -1378,6 +1529,9 @@ class MessageStatsPlugin(Star):
         
         group_id = str(group_id)
         current_user_id = str(current_user_id)
+        
+        # 生成排行榜时缓存群组名称（供 Web 面板使用）
+        await self._cache_group_name(event, group_id)
         
         # 获取群组数据
         group_data = await self.data_manager.get_group_data(group_id)

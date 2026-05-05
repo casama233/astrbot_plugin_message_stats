@@ -101,6 +101,12 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 | `milestone_targets` | list | `[666, 1000, 2333, 5000, 6666, 10000, 23333]` | 触发推送的发言次数里程碑列表 |
 | `blocked_users` | list | `[]` | 屏蔽用户列表（支持QQ号或Telegram用户ID） |
 | `blocked_groups` | list | `[]` | 屏蔽群聊列表（支持QQ群号或Telegram群组ID） |
+| `llm_enabled` | bool | `false` | 启用 LLM 发言头衔分析，定时推送排行榜时生成个性化头衔 |
+| `llm_provider_id` | string | `` | LLM Provider ID，留空使用默认 |
+| `llm_system_prompt` | text | 默认提示词 | 头衔生成提示词模板，可自定义风格和颜色 |
+| `llm_max_retries` | int | `2` | LLM 调用失败时的重试次数 |
+| `llm_min_daily_messages` | int | `0` | 每日发言次数最小值，低于此值不生成头衔 |
+| `llm_enable_on_manual` | bool | `false` | 手动查询排行榜时也调用LLM分析（会产生Token消耗） |
 
 ### 配置方式
 1. 通过AstrBot Web面板配置（推荐）
@@ -149,17 +155,14 @@ astrbot_plugin_message_stats/
 
 ## 📝 更新日志
 
+### v1.9.0 (2026-05-05)
+- ✅ Web 数据管理面板大升级（选择群组、彩色头像、群名展示）
+- ✅ 群组数据删除功能（Web 面板 🗑️ 删除按钮 + 二次确认）
+- ✅ 群名称持久化缓存（发言榜自动获取，改名后立即同步）
+- ✅ 修复多项错误
+
 ### v1.8.7 (2026-05-04)
 - ✅ LLM 头衔配色大师
-- ✅ 修复 LLM 头衔不显示的问题
-- ✅ 修复头衔颜色硬编码
-- ✅ 修复头衔徽章垂直不对齐
-- ✅ 修复 titles_map 变量未定义错误
-
-### v1.8.5 (2026-05-04)
-- ✅ 修复昵称双重 HTML 转义导致显示乱码
-- ✅ 修复定时推送数据丢失问题
-- ✅ 优化群组锁自动清理机制
 
 ### v1.8.2 (2026-05-03)
 - ✅ 优化浏览器资源占用，省下约100M内存
