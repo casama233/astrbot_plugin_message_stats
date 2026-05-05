@@ -7,7 +7,7 @@
         content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline' https:;">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ title_text }}</title>
+    <title>发言里程碑</title>
     <style>
         {% raw %}
         * {
@@ -165,7 +165,7 @@
 
 <body>
     <div class="poster">
-        <div class="brand-header">{{ milestone_brand }}</div>
+        <div class="brand-header">群聊成就</div>
 
         <div class="card-stage">
             <svg class="svg-canvas" viewBox="0 0 480 560">
@@ -193,17 +193,17 @@
                 </div>
 
                 <div class="text-body">
-                    <div class="eng-hint">{{ ms_hint_line1 }}<br>{{ ms_hint_line2 }}</div>
+                    <div class="eng-hint">Total number<br>of messages</div>
                     <div class="main-row">
-                        <span class="label-txt">{{ ms_milestone_label }}</span>
+                        <span class="label-txt">总发言破</span>
                         <span class="num-red">{{ milestone_count }}</span>
                     </div>
                     
                     <div class="info-row">
-                        {{ ms_rank_prefix }} <span style="color: #ff2244;">#{{ rank }}</span>
+                        群内排名 <span style="color: #ff2244;">#{{ rank }}</span>
                     </div>
                     <div class="info-row">
-                        { {{ ms_defeated_prefix }} <span style="color: #ff2244;">{{ percentage }}%</span> {{ ms_defeated_suffix }} }
+                        { 击败了群内 <span style="color: #ff2244;">{{ percentage }}%</span> 的活跃群友 }
                     </div>
                 </div>
             </div>
