@@ -1,5 +1,3 @@
-🌐 **语言切换 / Language / Язык:** [**中文**](https://github.com/xiaoruange39/astrbot_plugin_message_stats/blob/main/README.md) | [English](https://github.com/xiaoruange39/astrbot_plugin_message_stats/blob/main/README_EN.md) | [Русский](https://github.com/xiaoruange39/astrbot_plugin_message_stats/blob/main/README_RU.md)
-
 ![:name](https://count.getloli.com/@astrbot_plugin_message_stats?name=astrbot_plugin_message_stats&theme=green&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto&prefix=0)
 
 # AstrBot 群发言统计插件
@@ -49,6 +47,7 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 - `#手动推送发言榜` - 手动推送排行榜
 - `#设置发言榜定时时间 [时间]` - 设置定时推送时间
 - `#设置发言榜定时群组 [群号]` - 添加定时推送群组
+- `#设置发言榜定时群组 [群号1] [群号2]` - 添加多个定时推送群组
 - `#删除发言榜定时群组 [群号]` - 删除定时推送群组
 - `#启用发言榜定时` - 启用定时推送
 - `#禁用发言榜定时` - 禁用定时推送
@@ -108,7 +107,6 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 | `llm_max_retries` | int | `2` | LLM 调用失败时的重试次数 |
 | `llm_min_daily_messages` | int | `0` | 每日发言次数最小值，低于此值不生成头衔 |
 | `llm_enable_on_manual` | bool | `false` | 手动查询排行榜时也调用LLM分析（会产生Token消耗） |
-| `image_language` | string | `zh-CN` | 图片显示语言：`zh-CN`中文/`en-US`英文/`ru-RU`俄语 |
 
 ### 配置方式
 1. 通过AstrBot Web面板配置（推荐）
@@ -126,11 +124,6 @@ astrbot_plugin_message_stats/
 ├── config.yaml           # 配置文件
 ├── example_config.json   # 配置示例
 ├── _conf_schema.json     # 配置架构（Web面板配置定义）
-├── .astrbot-plugin/       # AstrBot 插件资源
-│   └── i18n/             # 国际化翻译文件
-│       ├── zh-CN.json    # 中文翻译
-│       ├── en-US.json    # 英文翻译
-│       └── ru-RU.json    # 俄语翻译
 ├── data/                 # 数据目录
 │   ├── config.json       # 用户配置
 │   └── cmd_config.json   # 命令配置
@@ -138,8 +131,7 @@ astrbot_plugin_message_stats/
 │   ├── __init__.py
 │   ├── rank_template.html # 排行榜模板（default主题）
 │   ├── rank_template_liquid_glass.html # 液态玻璃主题模板
-│   ├── rank_template_liquid_glass_dark.html # 液态玻璃暗色主题模板
-│   └── milestone_template.html # 里程碑卡片模板
+│   └── rank_template_liquid_glass_dark.html # 液态玻璃暗色主题模板
 └── utils/                # 工具模块
     ├── __init__.py
     ├── data_manager.py   # 数据管理
@@ -153,15 +145,6 @@ astrbot_plugin_message_stats/
     └── validators.py     # 数据验证
 ```
 
-## 🌐 多语言支持
-
-本插件现已支持以下语言：
-- **中文（zh-CN）** - 默认语言
-- **English（en-US）** - 英文
-- **Русский（ru-RU）** - 俄语
-
-可在 WebUI 插件设置 →「图片显示语言」中选择排行榜图片的文字语言（中文/English/Русский）。
-
 ## 🌐 跨平台支持
 
 本插件现已支持以下平台：
@@ -171,14 +154,6 @@ astrbot_plugin_message_stats/
 - **飞书（Lark/Feishu）** - 完整功能支持
 
 ## 📝 更新日志
-
-### v1.9.1 (2026-05-05)
-- ✅ 插件国际化支持（zh-CN/en-US/ru-RU）
-- ✅ Page 页面前端多语言（自动检测浏览器语言）
-- ✅ 图片排行榜多语言（WebUI 设置中选择语言）
-- ✅ 里程碑卡片多语言
-- ✅ LLM Token 消耗文本多语言
-- ✅ 新增 `image_language` 配置项
 
 ### v1.9.0 (2026-05-05)
 - ✅ Web 数据管理面板大升级（选择群组、彩色头像、群名展示）

@@ -202,11 +202,11 @@ class UserData:
     # 按天聚合的字典 {date_str: count}，替代 history 列表存储
     # 10万条消息最多365个键值对，内存占用从O(n)降到O(365)
     _message_dates: Dict[str, int] = field(default_factory=dict)
-    # LLM 生成的头衔文本（持久化到文件）
+    # LLM 生成的头衔文本（运行时属性，不会持久化到文件）
     display_title: Optional[str] = None
     # LLM 生成的头衔颜色（运行时属性），如 "#EF4444"
     display_title_color: Optional[str] = None
-    # 时间段内的发言数（运行时属性，仅用于图片生成）
+    # 时间段内的发言数（运行时属性，仅用于图片生成，不会持久化到文件）
     display_total: Optional[int] = None
 
 
@@ -298,7 +298,7 @@ class UserData:
         Returns:
             Dict[str, Any]: 包含用户数据的字典
         """
-        result = {
+        return {
             "user_id": self.user_id,
             "nickname": self.nickname,
             "message_count": self.message_count,
@@ -307,11 +307,6 @@ class UserData:
             "first_message_time": self.first_message_time,
             "last_message_time": self.last_message_time
         }
-        if self.display_title:
-            result["display_title"] = self.display_title
-            if self.display_title_color:
-                result["display_title_color"] = self.display_title_color
-        return result
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'UserData':
@@ -336,12 +331,6 @@ class UserData:
             first_message_time=data.get("first_message_time"),
             last_message_time=data.get("last_message_time")
         )
-        
-        # 恢复持久化的头衔
-        if "display_title" in data:
-            user_data.display_title = data["display_title"]
-            if "display_title_color" in data:
-                user_data.display_title_color = data["display_title_color"]
         
         # 重建 _message_dates（兼容新旧格式）
         if "history" in data:
@@ -438,9 +427,6 @@ class PluginConfig:
         self.llm_enable_on_manual = False
         # 提示词版本号，版本升级时自动覆写
         self.llm_prompt_version = ""
-        
-        # 图片显示语言
-        self.image_language = "zh-CN"
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典
@@ -487,8 +473,7 @@ class PluginConfig:
             "llm_max_retries": self.llm_max_retries,
             "llm_min_daily_messages": self.llm_min_daily_messages,
             "llm_enable_on_manual": self.llm_enable_on_manual,
-            "llm_prompt_version": self.llm_prompt_version,
-            "image_language": self.image_language
+            "llm_prompt_version": self.llm_prompt_version
         }
     
     @classmethod
@@ -565,9 +550,6 @@ class PluginConfig:
         config.llm_min_daily_messages = data.get("llm_min_daily_messages", 0)
         config.llm_enable_on_manual = data.get("llm_enable_on_manual", False)
         config.llm_prompt_version = data.get("llm_prompt_version", "")
-        
-        # 图片显示语言
-        config.image_language = data.get("image_language", "zh-CN")
         
         return config
 
