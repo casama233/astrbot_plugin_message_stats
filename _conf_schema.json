@@ -164,5 +164,16 @@
     "description": "手动查询时也启用LLM分析",
     "hint": "开启后，使用发言榜、今日发言榜等手动命令时也会调用LLM生成头衔（注意会产生Token消耗）",
     "default": false
+  },
+  "image_language": {
+    "type": "string",
+    "description": "图片显示语言",
+    "hint": "设置排行榜图片中的文字语言（zh-CN中文/en-US英文/ru-RU俄语）",
+    "default": "zh-CN",
+    "options": [
+      "zh-CN",
+      "en-US",
+      "ru-RU"
+    ]
   }
 }

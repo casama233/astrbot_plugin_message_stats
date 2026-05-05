@@ -58,7 +58,7 @@ from .utils.constants import (
     GROUP_MEMBERS_CACHE_TTL as CACHE_TTL_SECONDS
 )
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.0")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.1")
 class MessageStatsPlugin(Star):
     """群发言统计插件
     该插件用于统计群组成员的发言次数,并生成多种类型的排行榜.
@@ -432,7 +432,7 @@ class MessageStatsPlugin(Star):
         except Exception as e:
             self.logger.error(f"里程碑推送失败: {e}", exc_info=True)
     
-    @filter.command("发言榜里程碑", alias={'发言里程碑'})
+    @filter.command("发言榜里程碑", alias={'发言里程碑', 'milestone', 'достижение'})
     async def show_my_milestone(self, event: AstrMessageEvent):
         """显示个人里程碑成就卡片，别名：发言里程碑"""
         group_id = event.get_group_id()
@@ -486,37 +486,37 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"里程碑获取失败: {e}", exc_info=True)
             yield event.plain_result(f"获取里程碑失败: {str(e)}")
 
-    @filter.command("发言榜", alias={'水群榜', 'B话榜', '发言排行', '发言统计'})
+    @filter.command("发言榜", alias={'水群榜', 'B话榜', '发言排行', '发言统计', 'leaderboard', 'рейтинг'})
     async def show_full_rank(self, event: AstrMessageEvent):
         """显示总排行榜，别名：水群榜/B话榜/发言排行/发言统计"""
         async for result in self._show_rank(event, RankType.TOTAL):
             yield result
     
-    @filter.command("今日发言榜", alias={'今日水群榜', '今日发言排行', '今日B话榜'})
+    @filter.command("今日发言榜", alias={'今日水群榜', '今日发言排行', '今日B话榜', 'today', 'сегодня'})
     async def show_daily_rank(self, event: AstrMessageEvent):
         """显示今日排行榜，别名：今日水群榜/今日发言排行/今日B话榜"""
         async for result in self._show_rank(event, RankType.DAILY):
             yield result
     
-    @filter.command("本周发言榜", alias={'本周水群榜', '本周发言排行', '本周B话榜'})
+    @filter.command("本周发言榜", alias={'本周水群榜', '本周发言排行', '本周B话榜', 'week', 'неделя'})
     async def show_weekly_rank(self, event: AstrMessageEvent):
         """显示本周排行榜，别名：本周水群榜/本周发言排行/本周B话榜"""
         async for result in self._show_rank(event, RankType.WEEKLY):
             yield result
     
-    @filter.command("本月发言榜", alias={'本月水群榜', '本月发言排行', '本月B话榜'})
+    @filter.command("本月发言榜", alias={'本月水群榜', '本月发言排行', '本月B话榜', 'month', 'месяц'})
     async def show_monthly_rank(self, event: AstrMessageEvent):
         """显示本月排行榜，别名：本月水群榜/本月发言排行/本月B话榜"""
         async for result in self._show_rank(event, RankType.MONTHLY):
             yield result
     
-    @filter.command("本年发言榜", alias={'本年水群榜', '本年发言排行', '本年B话榜', '年榜'})
+    @filter.command("本年发言榜", alias={'本年水群榜', '本年发言排行', '本年B话榜', '年榜', 'year', 'год'})
     async def show_yearly_rank(self, event: AstrMessageEvent):
         """显示本年排行榜，别名：本年水群榜/本年发言排行/本年B话榜/年榜"""
         async for result in self._show_rank(event, RankType.YEARLY):
             yield result
     
-    @filter.command("去年发言榜", alias={'去年水群榜', '去年发言排行', '去年B话榜'})
+    @filter.command("去年发言榜", alias={'去年水群榜', '去年发言排行', '去年B话榜', 'lastyear', 'прошлый'})
     async def show_last_year_rank(self, event: AstrMessageEvent):
         """显示去年排行榜，别名：去年水群榜/去年发言排行/去年B话榜"""
         async for result in self._show_rank(event, RankType.LAST_YEAR):
@@ -841,14 +841,34 @@ class MessageStatsPlugin(Star):
     
     def _generate_title(self, rank_type: RankType) -> str:
         now = datetime.now()
-        titles = {
-            RankType.TOTAL: "总发言排行榜",
-            RankType.DAILY: f"今日[{now.year}年{now.month}月{now.day}日]发言榜单",
-            RankType.WEEKLY: f"本周[{now.year}年{now.month}月第{now.isocalendar().week}周]发言榜单",
-            RankType.MONTHLY: f"本月[{now.year}年{now.month}月]发言榜单",
-            RankType.YEARLY: f"本年[{now.year}年]发言榜单",
-            RankType.LAST_YEAR: f"去年[{now.year-1}年]发言榜单",
-        }
+        lang = getattr(self.plugin_config, 'image_language', 'zh-CN')
+        if lang == 'en-US':
+            titles = {
+                RankType.TOTAL: "All-Time Leaderboard",
+                RankType.DAILY: f"Today [{now.year}-{now.month:02d}-{now.day:02d}]",
+                RankType.WEEKLY: f"This Week [{now.year} W{now.isocalendar().week}]",
+                RankType.MONTHLY: f"This Month [{now.year}-{now.month:02d}]",
+                RankType.YEARLY: f"This Year [{now.year}]",
+                RankType.LAST_YEAR: f"Last Year [{now.year-1}]",
+            }
+        elif lang == 'ru-RU':
+            titles = {
+                RankType.TOTAL: "Общий рейтинг",
+                RankType.DAILY: f"Сегодня [{now.year}-{now.month:02d}-{now.day:02d}]",
+                RankType.WEEKLY: f"Эта неделя [{now.year} W{now.isocalendar().week}]",
+                RankType.MONTHLY: f"Этот месяц [{now.year}-{now.month:02d}]",
+                RankType.YEARLY: f"Этот год [{now.year}]",
+                RankType.LAST_YEAR: f"Прошлый год [{now.year-1}]",
+            }
+        else:
+            titles = {
+                RankType.TOTAL: "总发言排行榜",
+                RankType.DAILY: f"今日[{now.year}年{now.month}月{now.day}日]发言榜单",
+                RankType.WEEKLY: f"本周[{now.year}年{now.month}月第{now.isocalendar().week}周]发言榜单",
+                RankType.MONTHLY: f"本月[{now.year}年{now.month}月]发言榜单",
+                RankType.YEARLY: f"本年[{now.year}年]发言榜单",
+                RankType.LAST_YEAR: f"去年[{now.year-1}年]发言榜单",
+            }
         return titles.get(rank_type, "发言榜单")
     
     def _generate_text_message(self, users_with_values, group_info, title, config):

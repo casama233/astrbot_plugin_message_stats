@@ -438,6 +438,9 @@ class PluginConfig:
         self.llm_enable_on_manual = False
         # 提示词版本号，版本升级时自动覆写
         self.llm_prompt_version = ""
+        
+        # 图片显示语言
+        self.image_language = "zh-CN"
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典
@@ -484,7 +487,8 @@ class PluginConfig:
             "llm_max_retries": self.llm_max_retries,
             "llm_min_daily_messages": self.llm_min_daily_messages,
             "llm_enable_on_manual": self.llm_enable_on_manual,
-            "llm_prompt_version": self.llm_prompt_version
+            "llm_prompt_version": self.llm_prompt_version,
+            "image_language": self.image_language
         }
     
     @classmethod
@@ -561,6 +565,9 @@ class PluginConfig:
         config.llm_min_daily_messages = data.get("llm_min_daily_messages", 0)
         config.llm_enable_on_manual = data.get("llm_enable_on_manual", False)
         config.llm_prompt_version = data.get("llm_prompt_version", "")
+        
+        # 图片显示语言
+        config.image_language = data.get("image_language", "zh-CN")
         
         return config
 
