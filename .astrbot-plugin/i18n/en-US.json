@@ -1,1 +1,101 @@
-{"metadata":{"display_name":"AstrBot Message Stats","short_desc":"Track group message counts with leaderboards and scheduled push","desc":"Track group member message counts. Supports total/daily/weekly/monthly/yearly leaderboards, LLM title generation, and scheduled push."},"config":{"theme":{"description":"Leaderboard theme","hint":"Visual theme for the leaderboard image"},"auto_theme_switch":{"description":"Auto theme switch","hint":"Automatically switch between light/dark themes based on time"},"theme_switch_light_time":{"description":"Light theme start time","hint":"Format HH:MM, e.g. 06:00"},"theme_switch_dark_time":{"description":"Dark theme start time","hint":"Format HH:MM, e.g. 18:00"},"detailed_logging_enabled":{"description":"Detailed logging","hint":"Disable to reduce log verbosity"},"rand":{"description":"Leaderboard display count","hint":"Number of users shown, recommended 5-50"},"if_send_pic":{"description":"Output mode","hint":"Image mode looks better, text mode uses less resources"},"timer_enabled":{"description":"Enable scheduled push","hint":"Auto push leaderboard at scheduled time"},"timer_push_time":{"description":"Push time","hint":"Supports HH:MM or cron format"},"timer_target_groups":{"description":"Target groups","hint":"Group IDs to receive push"},"timer_rank_type":{"description":"Leaderboard type","hint":"Type of leaderboard for scheduled push"},"milestone_enabled":{"description":"Milestone push","hint":"Auto push when user reaches milestone message count"},"milestone_targets":{"description":"Milestone counts","hint":"e.g. 666, 1000"},"blocked_users":{"description":"Blocked users","hint":"Users excluded from statistics"},"blocked_groups":{"description":"Blocked groups","hint":"Groups excluded from statistics"},"llm_enabled":{"description":"Enable LLM title analysis","hint":"Generate personalized titles using LLM"},"llm_provider_id":{"description":"LLM Provider ID","hint":"Leave empty for default"},"llm_system_prompt":{"description":"Title prompt","hint":"Customize title generation style and colors"},"llm_max_retries":{"description":"LLM retries","hint":"Number of retries on failure"},"llm_min_daily_messages":{"description":"Min daily messages","hint":"Users below this threshold won't get titles"},"llm_enable_on_manual":{"description":"Manual query LLM","hint":"Also generate titles on manual queries (uses Tokens)"}}}
+{
+  "metadata": {
+    "display_name": "AstrBot Message Stats",
+    "short_desc": "Track group message counts with leaderboards and scheduled push",
+    "desc": "Track group member message counts. Supports total/daily/weekly/monthly/yearly leaderboards, LLM title generation, and scheduled push."
+  },
+  "config": {
+    "theme": {
+      "description": "Leaderboard theme style",
+      "hint": "Visual theme for the leaderboard image (overridden when auto theme switch is enabled)",
+      "labels": ["Default", "Liquid Glass", "Liquid Glass Dark"]
+    },
+    "auto_theme_switch": {
+      "description": "Auto theme switch",
+      "hint": "Automatically switch between light/dark themes based on time, overrides manual theme setting"
+    },
+    "theme_switch_light_time": {
+      "description": "Light theme start time",
+      "hint": "Format HH:MM, e.g. 06:00"
+    },
+    "theme_switch_dark_time": {
+      "description": "Dark theme start time",
+      "hint": "Format HH:MM, e.g. 18:00"
+    },
+    "detailed_logging_enabled": {
+      "description": "Detailed logging",
+      "hint": "Disable to hide detailed message stats logs, only keep important system and error logs"
+    },
+    "rand": {
+      "description": "Leaderboard display count",
+      "hint": "Number of users shown on the leaderboard, recommended 5-50"
+    },
+    "if_send_pic": {
+      "description": "Output mode",
+      "hint": "Choose display mode: image mode is more visually appealing but uses more resources",
+      "labels": ["Text", "Image"]
+    },
+    "timer_enabled": {
+      "description": "Enable scheduled push",
+      "hint": "Auto push leaderboard at scheduled time to specified groups"
+    },
+    "timer_push_time": {
+      "description": "Push time",
+      "hint": "Supports HH:MM format (daily specified time) or cron format (complex expressions like '0 9 * * *' for 9 AM daily)"
+    },
+    "timer_target_groups": {
+      "description": "Target groups",
+      "hint": "Group IDs to receive scheduled push, leave empty to push to all groups"
+    },
+    "timer_rank_type": {
+      "description": "Leaderboard type",
+      "hint": "Select the statistics range for scheduled push leaderboard",
+      "labels": ["Daily", "Total", "Weekly", "Monthly", "Yearly", "Last Year"]
+    },
+    "milestone_enabled": {
+      "description": "Milestone push",
+      "hint": "Auto push leaderboard when user reaches milestone message count"
+    },
+    "milestone_targets": {
+      "description": "Milestone counts",
+      "hint": "Message counts that trigger milestone push, e.g. 666, 1000, 5000, 10000"
+    },
+    "blocked_users": {
+      "description": "Blocked users",
+      "hint": "Block specified users from appearing on leaderboards and statistics. Enter full user IDs (QQ number or Telegram user ID)."
+    },
+    "blocked_groups": {
+      "description": "Blocked groups",
+      "hint": "Block specified groups from statistics and leaderboard commands. Enter full group IDs (QQ group number or Telegram group ID)."
+    },
+    "llm_enabled": {
+      "description": "Enable LLM title analysis",
+      "hint": "Generate personalized titles for members based on message stats using LLM during scheduled push"
+    },
+    "llm_provider_id": {
+      "description": "LLM Provider ID",
+      "hint": "Select the LLM Provider for title generation. Leave empty to use the current session's default provider."
+    },
+    "llm_system_prompt": {
+      "description": "Title generation prompt",
+      "hint": "Customize title generation style, colors and JSON format. Leave empty for default template."
+    },
+    "llm_max_retries": {
+      "description": "LLM retries",
+      "hint": "Number of retries when LLM call fails"
+    },
+    "llm_min_daily_messages": {
+      "description": "Min daily messages",
+      "hint": "Only users with daily messages >= this value get LLM titles. Set to 0 to analyze all users with messages."
+    },
+    "llm_enable_on_manual": {
+      "description": "Enable LLM on manual queries",
+      "hint": "Also generate LLM titles when using manual commands like leaderboard (note: consumes Tokens)"
+    },
+    "image_language": {
+      "description": "Image language",
+      "hint": "Language for text in leaderboard images",
+      "labels": ["Chinese", "English", "Russian"]
+    }
+  }
+}

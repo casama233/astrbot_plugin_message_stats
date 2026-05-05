@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>发言统计面板</title>
+<title data-i18n="page_title">发言统计面板</title>
 <style>
 :root {
   --bg: linear-gradient(135deg,#E9EFF6 0%,#D6E4F0 100%);
@@ -60,12 +60,12 @@ BODY {
   display:flex; flex-direction:column
 }
 .hd { text-align:center; padding:24px 40px 0; flex-shrink:0 }
-.hd H1 { font-size:24px }
+.hd H1 { font-size:30px }
 .mn { display:flex; flex:1; padding:16px 40px 40px; gap:20px; min-height:0 }
 .sb { width:var(--sb-w); flex-shrink:0; display:flex; flex-direction:column }
 .sb .c { flex:1; overflow:hidden; margin:0; display:flex; flex-direction:column }
 .sb .c H2 {
-  font-size:18px; text-align:center;
+  font-size:22px; text-align:center;
   padding:16px 16px 8px; border-bottom:2px solid var(--l); margin:0
 }
 .sb-hint {
@@ -74,14 +74,14 @@ BODY {
 }
 .sb .ul-wrap { flex:1; overflow-y:auto; padding:4px 8px }
 .sb li {
-  padding:14px 16px; flex-direction:column;
-  align-items:stretch; gap:6px; border-bottom:1px solid var(--l)
+  padding:12px 16px; flex-direction:column;
+  align-items:stretch; gap:4px; border-bottom:1px solid var(--l)
 }
 .sb li:last-child { border-bottom:none }
-.sb li:hover { transform:translateX(3px); border-radius:10px }
+.sb li:hover { transform:translateX(5px); border-radius:12px }
 .sb li .A { font-size:14px }
 .sb li .B { font-size:12px }
-.sb li.sel { background:var(--tbg); border-radius:10px }
+.sb li.sel { background:var(--tbg); border-radius:12px }
 .ct { flex:1; min-width:0; display:flex; flex-direction:column }
 .ct .c { flex:1; margin:0 }
 .emp {
@@ -109,7 +109,7 @@ BODY {
 .del-corner:hover { background:rgba(248,113,113,0.25) }
 html[data-theme=dark] .del-corner:hover { background:rgba(248,113,113,0.3) }
 .gn {
-  text-align:center; padding:28px 20px 8px; font-size:20px;
+  text-align:center; padding:50px 20px 6px; font-size:20px;
   font-weight:700; color:var(--n); line-height:1.5; word-break:break-all
 }
 ul { list-style:none; padding:4px 0 }
@@ -139,8 +139,9 @@ li .B { font-size:13px; color:var(--c2); margin:4px 0 0 }
 .ri2 { flex:1; min-width:0 }
 .ri2 .nn { font-size:20px; font-weight:600; color:var(--n); transition:color .3s }
 .ri2 .tt {
-  font-size:12px; color:var(--ttc); font-weight:700; margin:0 0 0 6px;
-  background:var(--ttbg); padding:0 6px; border-radius:6px; display:inline-block
+  font-size:12px; font-weight:700; margin:0 0 0 6px;
+  padding:2px 8px; border-radius:6px; display:inline-block;
+  line-height:1.4
 }
 .ri2 .dd { font-size:13px; color:var(--c2); margin:4px 0 0 }
 .rs { text-align:right; flex-shrink:0; margin:0 0 0 20px }
@@ -149,7 +150,6 @@ li .B { font-size:13px; color:var(--c2); margin:4px 0 0 }
 .hi { text-align:center; padding:16px 16px 20px; border-bottom:1px solid var(--l) }
 .hi .X { font-size:36px; font-weight:700; color:var(--n2) }
 .hi .y { font-size:14px; color:var(--c2); margin:6px 0 0 }
-.hi .z { font-size:12px; color:var(--c3); margin:2px 0 0 }
 .ld { text-align:center; padding:80px 20px; color:var(--c3); font-size:16px }
 .em { text-align:center; padding:80px 20px; color:var(--c3) }
 .sb .ld { padding:40px 20px }
@@ -180,32 +180,131 @@ li .B { font-size:13px; color:var(--c2); margin:4px 0 0 }
 </head>
 <body>
 
-<div class="hd"><h1>📊 发言统计面板</h1></div>
+<div class="hd"><h1 data-i18n="page_title">📊 发言统计面板</h1></div>
 
 <div class="mn">
   <div class="sb" id="sidebar">
     <div class="c">
-      <h2>选择群组</h2>
-      <div class="sb-hint">💡 群名称会在触发发言榜后更新</div>
+      <h2 data-i18n="select_group">选择群组</h2>
+      <div class="sb-hint" data-i18n="group_name_hint">💡 群名会在对应群触发发言榜后更新</div>
       <div class="ul-wrap"><ul id="gl"></ul></div>
     </div>
   </div>
   <div class="ct" id="content">
-    <div class="emp">👈 从左侧选择一个群组查看详情</div>
+    <div class="emp" data-i18n="select_prompt">👈 从左侧选择一个群组查看详情</div>
   </div>
 </div>
 
 <div id="md">
   <div id="md_in">
-    <div id="md_msg">确认删除？</div>
+    <div id="md_msg" data-i18n="confirm_delete">确认删除？</div>
     <div id="md_btns">
-      <button id="md_no" style="background:rgba(128,128,128,0.15);color:var(--c)">取消</button>
-      <button id="md_yes" style="background:#EF4444;color:#fff">确认删除</button>
+      <button id="md_no" data-i18n="cancel" style="background:rgba(128,128,128,0.15);color:var(--c)">取消</button>
+      <button id="md_yes" data-i18n="confirm" style="background:#EF4444;color:#fff">确认删除</button>
     </div>
   </div>
 </div>
 
 <script type="module">
+// ========== 前端国际化 i18n ==========
+const i18n = {
+  "zh-CN": {
+    page_title: "📊 发言统计面板",
+    select_group: "选择群组",
+    group_name_hint: "💡 群名会在对应群触发发言榜后更新",
+    select_prompt: "👈 从左侧选择一个群组查看详情",
+    confirm_delete: "确认删除？",
+    confirm_delete_data: "确定要删除此群组的所有发言数据吗？此操作不可恢复！",
+    cancel: "取消",
+    confirm: "确认删除",
+    no_group_data: "暂无群组数据",
+    loading: "加载中...",
+    load_failed: "加载失败",
+    no_data: "暂无数据",
+    total_messages: "总发言数 · 共 {count} 人",
+    latest_message: "最近发言",
+    unknown: "未知",
+    delete_data: "🗑️ 删除数据",
+    messages_suffix: " 条",
+    members_suffix: " 人 · ",
+    warning_default_group: "⚠️ ",
+    people: " 人"
+  },
+  "en-US": {
+    page_title: "📊 Message Stats Dashboard",
+    select_group: "Select Group",
+    group_name_hint: "💡 Group name updates after someone triggers the leaderboard",
+    select_prompt: "👈 Select a group from the left to view details",
+    confirm_delete: "Confirm deletion?",
+    confirm_delete_data: "Are you sure you want to delete all message data for this group? This action cannot be undone!",
+    cancel: "Cancel",
+    confirm: "Delete",
+    no_group_data: "No group data available",
+    loading: "Loading...",
+    load_failed: "Load failed",
+    no_data: "No data",
+    total_messages: "Total · {count} members",
+    latest_message: "Last seen",
+    unknown: "Unknown",
+    delete_data: "🗑️ Delete Data",
+    messages_suffix: " msgs",
+    members_suffix: " members · ",
+    warning_default_group: "⚠️ ",
+    people: " members"
+  },
+  "ru-RU": {
+    page_title: "📊 Панель статистики сообщений",
+    select_group: "Выберите группу",
+    group_name_hint: "💡 Название группы обновляется после вызова рейтинга",
+    select_prompt: "👈 Выберите группу слева для просмотра",
+    confirm_delete: "Подтвердить удаление?",
+    confirm_delete_data: "Вы уверены, что хотите удалить все данные этой группы? Это действие необратимо!",
+    cancel: "Отмена",
+    confirm: "Удалить",
+    no_group_data: "Нет данных о группах",
+    loading: "Загрузка...",
+    load_failed: "Ошибка загрузки",
+    no_data: "Нет данных",
+    total_messages: "Всего · {count} участников",
+    latest_message: "Последнее сообщение",
+    unknown: "Неизвестно",
+    delete_data: "🗑️ Удалить данные",
+    messages_suffix: " сообщ.",
+    members_suffix: " участников · ",
+    warning_default_group: "⚠️ ",
+    people: " участ."
+  }
+};
+
+function getLocale() {
+  const lang = (navigator.language || 'zh-CN').toLowerCase();
+  if (lang.startsWith('zh')) return 'zh-CN';
+  if (lang.startsWith('ru')) return 'ru-RU';
+  return 'en-US';
+}
+
+function t(key, vars) {
+  const locale = getLocale();
+  const dict = i18n[locale] || i18n['en-US'];
+  let text = dict[key] || i18n['en-US'][key] || key;
+  if (vars) {
+    for (const k in vars) {
+      text = text.replace('{' + k + '}', vars[k]);
+    }
+  }
+  return text;
+}
+
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(function(el) {
+    const key = el.getAttribute('data-i18n');
+    el.textContent = t(key);
+  });
+  document.title = t('page_title');
+}
+
+applyI18n();
+
 const B = window.AstrBotPluginPage;
 if (!B) {
   document.querySelector('.emp').innerHTML = '<div class="ld">Bridge not available</div>';
@@ -213,7 +312,6 @@ if (!B) {
 } else {
   await B.ready();
 
-  // 主题跟随系统
   (function() {
     const dm = window.matchMedia('(prefers-color-scheme:dark)');
     function st(d) { document.documentElement.setAttribute('data-theme', d ? 'dark' : 'light'); }
@@ -245,12 +343,12 @@ if (!B) {
     const c = n && n.trim() ? n.trim()[0] : '?';
     return '<div class="av" style="background:' + getColor(n || 'x') + '">' + c + '</div>';
   }
-  function isDefault(n) { return n && n.startsWith('群') && !n.includes(' - '); }
+  function isDefault(n) { return n && (n.startsWith('群') && !n.includes(' - ') || n.match(/^group\d+$/i)); }
 
   function renderSidebar() {
     let h = '';
     if (!GD || !GD.length) {
-      GL.innerHTML = '<li style="cursor:default;color:var(--c3);justify-content:center;padding:40px 14px;border:none">暂无群组数据</li>';
+      GL.innerHTML = '<li style="cursor:default;color:var(--c3);justify-content:center;padding:40px 14px;border:none">' + t('no_group_data') + '</li>';
       return;
     }
     GD.forEach(function(x) {
@@ -261,8 +359,8 @@ if (!B) {
       const sel = SEL === x.group_id ? ' sel' : '';
       h += '<li class="' + sel + '" data-gid="' + x.group_id + '">'
          +   '<div class="l">'
-         +     '<div class="A' + (no ? '" style="color:var(--htc)"' : '') + '">' + (no ? '⚠️ ' : '') + dn + '</div>'
-         +     '<div class="B">' + un + ' 人 · ' + tm + ' 条' + (x.file_size ? ' · ' + x.file_size : '') + '</div>'
+         +     '<div class="A' + (no ? '" style="color:var(--htc)"' : '') + '">' + (no ? t('warning_default_group') : '') + dn + '</div>'
+         +     '<div class="B">' + un + t('people') + ' · ' + tm + t('messages_suffix') + (x.file_size ? ' · ' + x.file_size : '') + '</div>'
          +   '</div>'
          + '</li>';
     });
@@ -275,32 +373,30 @@ if (!B) {
   function renderDetail() {
     const g = GD.find(function(x) { return x.group_id === SEL; });
     if (!g) {
-      CT.innerHTML = '<div class="emp">👈 从左侧选择一个群组查看详情</div>';
+      CT.innerHTML = '<div class="emp">' + t('select_prompt') + '</div>';
       return;
     }
     const u = g.top_users || [];
-    const dn = g.display_name || g.group_name || '群' + g.group_id;
-    const no = isDefault(dn);
     const tm = g.total_messages || 0;
     const uc = g.user_count || 0;
     let h = '';
     h += '<div class="c">'
-      +   '<div class="c-top"><button class="del-corner" id="delBtn">🗑️ 删除数据</button></div>'
-      +   '<div class="gn">' + (no ? '⚠️ ' : '') + g.group_name + '[' + g.group_id + ']</div>'
+      +   '<div class="c-top"><button class="del-corner" id="delBtn">' + t('delete_data') + '</button></div>'
+      +   '<div class="gn">' + g.group_name + '[' + g.group_id + ']</div>'
       +   '<div class="hi">'
       +     '<div class="X">' + tm + '</div>'
-      +     '<div class="y">总发言数 · 共 ' + uc + ' 人</div>'
-      +     '<div class="z">ID: ' + g.group_id + (g.file_size ? ' · 数据: ' + g.file_size : '') + '</div>'
+      +     '<div class="y">' + t('total_messages', { count: uc }) + '</div>'
       +   '</div>'
       +   '<div class="rc">';
     if (u.length) {
       h += u.map(function(x) {
-        const t = x.title ? '<span class="tt">「' + x.title + '」</span>' : '';
+        var tc = x.title_color || '#7C3AED';
+        var ttl = x.title ? '<span class="tt" style="color:' + tc + ';background:' + tc + '22;">「' + x.title + '」</span>' : '';
         return '<div class="ri">'
              +   makeAvatar(x.nickname)
              +   '<div class="ri2">'
-             +     '<div class="nn">' + x.nickname + t + '</div>'
-             +     '<div class="dd">最近发言: ' + (x.last_date || '未知') + '</div>'
+             +     '<div class="nn">' + x.nickname + ttl + '</div>'
+             +     '<div class="dd">' + t('latest_message') + ': ' + (x.last_date || t('unknown')) + '</div>'
              +   '</div>'
              +   '<div class="rs">'
              +     '<div class="nn2">' + x.message_count + '</div>'
@@ -309,14 +405,14 @@ if (!B) {
              + '</div>';
       }).join('');
     } else {
-      h += '<div class="em" style="padding:40px 20px">暂无用户数据</div>';
+      h += '<div class="em" style="padding:40px 20px">' + t('no_data') + '</div>';
     }
     h += '</div></div>';
     CT.innerHTML = h;
     const db = document.getElementById('delBtn');
     if (db) {
       db.onclick = function() {
-        MD_MSG.textContent = '确定要删除此群组的所有发言数据吗？此操作不可恢复！';
+        MD_MSG.textContent = t('confirm_delete_data');
         MD_CB = function() {
           B.apiGet('delete', { group_id: SEL }).then(function() {
             GD = GD.filter(function(x) { return x.group_id !== SEL; });
@@ -329,7 +425,7 @@ if (!B) {
   }
 
   function loadGroups() {
-    GL.innerHTML = '<li style="cursor:default;color:var(--c3);justify-content:center;padding:40px 14px;border:none">加载中...</li>';
+    GL.innerHTML = '<li style="cursor:default;color:var(--c3);justify-content:center;padding:40px 14px;border:none">' + t('loading') + '</li>';
     B.apiGet('stats').then(function(r) {
       const d = F(r), g = d && d.groups ? d.groups : null;
       if (g && g.length) {
@@ -343,20 +439,20 @@ if (!B) {
         }
       } else {
         GD = []; renderSidebar();
-        CT.innerHTML = '<div class="emp">暂无群组数据</div>';
+        CT.innerHTML = '<div class="emp">' + t('no_data') + '</div>';
       }
     }).catch(function(e) {
-      GL.innerHTML = '<li style="cursor:default;color:var(--c3);justify-content:center;padding:40px 14px;border:none">加载失败</li>';
-      CT.innerHTML = '<div class="emp">暂无群组数据</div>';
+      GL.innerHTML = '<li style="cursor:default;color:var(--c3);justify-content:center;padding:40px 14px;border:none">' + t('load_failed') + '</li>';
+      CT.innerHTML = '<div class="emp">' + t('load_failed') + '</div>';
     });
   }
 
   function enterGroup(id) {
     SEL = id; renderSidebar();
-    CT.innerHTML = '<div class="ld">加载中...</div>';
+    CT.innerHTML = '<div class="ld">' + t('loading') + '</div>';
     B.apiGet('stats', { group_id: id }).then(function(r) {
       const d = F(r), ng = d && d.group ? d.group : null;
-      if (!ng) { CT.innerHTML = '<div class="emp">暂无数据</div>'; return; }
+      if (!ng) { CT.innerHTML = '<div class="emp">' + t('no_data') + '</div>'; return; }
       const idx = GD.findIndex(function(x) { return x.group_id === id; });
       if (idx > -1) {
         GD[idx] = Object.assign({}, GD[idx], {
@@ -367,7 +463,7 @@ if (!B) {
       }
       renderDetail();
     }).catch(function(e) {
-      CT.innerHTML = '<div class="emp">加载失败</div>';
+      CT.innerHTML = '<div class="emp">' + t('load_failed') + '</div>';
     });
   }
 
