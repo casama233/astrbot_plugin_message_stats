@@ -1,4 +1,4 @@
-🌐 **Язык / Language / 语言:** [中文](README.md) | [English](README_EN.md) | [**Русский**](README_RU.md)
+🌐 **Язык / Language / 语言:** [中文](https://github.com/xiaoruange39/astrbot_plugin_message_stats/blob/main/README.md) | [English](https://github.com/xiaoruange39/astrbot_plugin_message_stats/blob/main/README_EN.md) | [**Русский**](https://github.com/xiaoruange39/astrbot_plugin_message_stats/blob/main/README_RU.md)
 
 ![:name](https://count.getloli.com/@astrbot_plugin_message_stats?name=astrbot_plugin_message_stats&theme=green&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto&prefix=0)
 
