@@ -202,11 +202,11 @@ class UserData:
     # 按天聚合的字典 {date_str: count}，替代 history 列表存储
     # 10万条消息最多365个键值对，内存占用从O(n)降到O(365)
     _message_dates: Dict[str, int] = field(default_factory=dict)
-    # LLM 生成的头衔文本（运行时属性，不会持久化到文件）
+    # LLM 生成的头衔文本（持久化到文件）
     display_title: Optional[str] = None
     # LLM 生成的头衔颜色（运行时属性），如 "#EF4444"
     display_title_color: Optional[str] = None
-    # 时间段内的发言数（运行时属性，仅用于图片生成，不会持久化到文件）
+    # 时间段内的发言数（运行时属性，仅用于图片生成）
     display_total: Optional[int] = None
 
 
@@ -298,7 +298,7 @@ class UserData:
         Returns:
             Dict[str, Any]: 包含用户数据的字典
         """
-        return {
+        result = {
             "user_id": self.user_id,
             "nickname": self.nickname,
             "message_count": self.message_count,
@@ -307,6 +307,11 @@ class UserData:
             "first_message_time": self.first_message_time,
             "last_message_time": self.last_message_time
         }
+        if self.display_title:
+            result["display_title"] = self.display_title
+            if self.display_title_color:
+                result["display_title_color"] = self.display_title_color
+        return result
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'UserData':
@@ -331,6 +336,12 @@ class UserData:
             first_message_time=data.get("first_message_time"),
             last_message_time=data.get("last_message_time")
         )
+        
+        # 恢复持久化的头衔
+        if "display_title" in data:
+            user_data.display_title = data["display_title"]
+            if "display_title_color" in data:
+                user_data.display_title_color = data["display_title_color"]
         
         # 重建 _message_dates（兼容新旧格式）
         if "history" in data:
