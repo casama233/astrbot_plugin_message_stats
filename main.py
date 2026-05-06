@@ -866,7 +866,8 @@ class MessageStatsPlugin(Star):
                 last_date = target_user_data.last_date
             
             # 创建群组信息
-            group_info = GroupInfo(group_id=str(group_id))
+            unified_msg_origin = self.group_unified_msg_origins.get(str(group_id), "")
+            group_info = GroupInfo(group_id=str(group_id), unified_msg_origin=unified_msg_origin)
             group_name = await self._get_group_name(None, group_id)
             group_info.group_name = group_name
             
@@ -979,7 +980,8 @@ class MessageStatsPlugin(Star):
                 last_date = target_user_data.last_date
             
             # 创建群组信息
-            group_info = GroupInfo(group_id=str(group_id))
+            unified_msg_origin = self.group_unified_msg_origins.get(str(group_id), "")
+            group_info = GroupInfo(group_id=str(group_id), unified_msg_origin=unified_msg_origin)
             group_name = await self._get_group_name(event, group_id)
             group_info.group_name = group_name
             
@@ -1606,7 +1608,8 @@ class MessageStatsPlugin(Star):
         title = self._generate_title(rank_type)
         
         # 创建群组信息
-        group_info = GroupInfo(group_id=group_id)
+        unified_msg_origin = self.group_unified_msg_origins.get(group_id, "")
+        group_info = GroupInfo(group_id=group_id, unified_msg_origin=unified_msg_origin)
         
         # 获取群名称
         group_name = await self._get_group_name(event, group_id)

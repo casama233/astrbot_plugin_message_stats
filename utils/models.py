@@ -585,6 +585,8 @@ class GroupInfo:
         group_id (str): 群组唯一标识符
         group_name (str): 群组名称，默认为空字符串
         member_count (int): 群组成员数量，默认为0
+        unified_msg_origin (str): 消息来源标识，格式 "平台名:消息类型:群ID"
+                                  用于识别平台（qq/telegram/discord/lark等）
         
     Methods:
         to_dict(): 转换为字典格式
@@ -597,6 +599,23 @@ class GroupInfo:
     group_id: str
     group_name: str = ""
     member_count: int = 0
+    unified_msg_origin: str = ""
+    
+    def get_platform(self) -> str:
+        """从 unified_msg_origin 中提取平台名
+        
+        格式: "平台名:消息类型:群ID"
+        例如: "qq:GroupMessage:123456" -> "qq"
+              "Amydd:GroupMessage:-100123" -> "Amydd" (Telegram)  
+              "discord:..." -> "discord"
+              "lark:..." -> "lark" (飞书)
+        
+        Returns:
+            str: 平台名，无法识别时返回 ""
+        """
+        if self.unified_msg_origin and ':' in self.unified_msg_origin:
+            return self.unified_msg_origin.split(':', 1)[0]
+        return ""
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典

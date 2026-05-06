@@ -569,7 +569,7 @@ class ImageGenerator:
                 return None
             
             # 准备模板数据
-            avatar_url = self._get_avatar_url(user_id, nickname, group_info.group_id)
+            avatar_url = self._get_avatar_url(user_id, nickname, group_info)
             group_name = group_info.group_name or f"群{group_info.group_id}"
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
@@ -671,6 +671,7 @@ class ImageGenerator:
             return await self._generate_empty_html(group_info, title)
         
         # 使用批量处理优化性能（显式传入头衔映射）
+        self._current_group_info = group_info
         processed_data = self._process_user_data_batch(users, current_user_id, titles_map, group_info)
         
         # 计算统计数据
@@ -713,7 +714,6 @@ class ImageGenerator:
         """
         if not users:
             return {'total_messages': 0, 'user_items': []}
-        group_id = str(group_info.group_id) if group_info else ""
         
         # 预计算统计数据 - 使用时间段内的发言数
         total_messages = sum(user.display_total if user.display_total is not None else user.message_count for user in users)
@@ -753,13 +753,13 @@ class ImageGenerator:
                 'nickname': user.nickname,
                 'title': user_title,
                 'title_color': user_title_color,
-                'avatar_url': self._get_avatar_url(user.user_id, user.nickname, group_id),
+                'avatar_url': self._get_avatar_url(user.user_id, user.nickname, self._current_group_info),
                 'total': user_messages,
                 'percentage': (user_messages / total_messages * 100) if total_messages > 0 else 0,
                 'last_date': user.last_date or "未知",
                 'is_current_user': is_current_user,
                 'is_separator': False,
-                'group_id': group_id
+                '_group_info': group_info
             })
         
         # 如果当前用户不在排行榜中，添加到末尾
@@ -771,13 +771,13 @@ class ImageGenerator:
                 user_items.append({
                     'rank': current_rank,
                     'nickname': current_user_data.nickname,
-                    'avatar_url': self._get_avatar_url(current_user_data.user_id, current_user_data.nickname, group_id),
+                    'avatar_url': self._get_avatar_url(current_user_data.user_id, current_user_data.nickname, self._current_group_info),
                     'total': current_user_messages,
                     'percentage': (current_user_messages / total_messages * 100) if total_messages > 0 else 0,
                     'last_date': current_user_data.last_date or "未知",
                     'is_current_user': True,
                     'is_separator': True,
-                    'group_id': group_id
+                    '_group_info': group_info
                 })
         
         return {
@@ -1043,7 +1043,7 @@ class ImageGenerator:
             safe_avatar_url = self._get_avatar_url(
                 str(item_data.get('user_id', '0')),
                 str(item_data.get('nickname', '')),
-                str(item_data.get('group_id', ''))
+                item_data.get('_group_info', None)
             )
         
         content = {
@@ -1101,36 +1101,44 @@ class ImageGenerator:
         encoded = quote(svg)
         return f"data:image/svg+xml,{encoded}"
 
-    def _get_avatar_url(self, user_id: str, nickname: str = "", group_id: str = "") -> str:
+    @staticmethod
+    def _detect_platform_from_origin(origin: str) -> str:
+        """从 unified_msg_origin 中提取平台名
+        
+        unified_msg_origin 格式: "平台名:消息类型:群ID"（至少第一个冒号前是平台名）
+        """
+        if origin and ':' in origin:
+            return origin.split(':', 1)[0].strip().lower()
+        return ""
+
+    def _get_avatar_url(self, user_id: str, nickname: str = "", group_info: 'GroupInfo' = None) -> str:
         """获取用户头像URL
         
-        优先尝试获取真实头像，获取不到时回退为彩色首字母 SVG data URI。
-        根据 group_id 特征判断平台：
-        - 正数或含 'qq' 等 → QQ 平台，使用 qlogo
-        - 负数或含 'telegram' 等 → Telegram 等其他平台，直接回退彩色文字头像
+        根据群组的 unified_msg_origin 判断平台：
+        - qq → 使用 qlogo.cn 获取真实头像
+        - 其他（telegram/discord/lark/Amydd等）→ 回退彩色首字母 SVG data URI
         
         Args:
             user_id: 用户ID
             nickname: 用户昵称（用于回退头像的首字母）
-            group_id: 群组ID（用于判断平台）
+            group_info: 群组信息（包含 unified_msg_origin 用于判断平台）
         
         Returns:
             str: 头像URL
         """
-        # 根据群组ID特征判断平台
-        group_id_str = str(group_id)
         user_id_str = str(user_id)
         
-        # 正数群ID → QQ平台，使用QQ头像服务
-        # 负数群ID（Telegram等）或其他平台 → 跳过外部头像服务，直接回退彩色文字头像
-        if group_id_str.lstrip('-').isdigit() and not group_id_str.startswith('-'):
-            # QQ平台：使用 qlogo 获取真实头像
-            qq_url = f"https://q1.qlogo.cn/g?b=qq&nk={user_id_str}&s=640"
-            # 返回 QQ 头像 URL
-            # 注意：QQ头像如果不存在会返回默认头像，不需要单独 fallback
-            return qq_url
+        # 从 unified_msg_origin 提取平台名
+        if group_info:
+            platform = self._detect_platform_from_origin(group_info.unified_msg_origin)
+        else:
+            platform = ""
         
-        # 其他平台（Telegram、Discord等）：直接回退彩色首字母文字头像
+        # QQ平台：使用 qlogo 获取真实头像
+        if platform == 'qq':
+            return f"https://q1.qlogo.cn/g?b=qq&nk={user_id_str}&s=640"
+        
+        # 其他平台（telegram/discord/lark等）：回退彩色首字母文字头像
         return self._generate_avatar_svg_data_uri(nickname, user_id_str)
     
     @safe_file_operation(default_return="")

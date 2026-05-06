@@ -799,7 +799,8 @@ class TimerManager:
             users_for_rank.append(user_data)
         
         # 创建群组信息
-        group_info = GroupInfo(group_id=str(group_id))
+        unified_msg_origin = self.group_unified_msg_origins.get(str(group_id), "")
+        group_info = GroupInfo(group_id=str(group_id), unified_msg_origin=unified_msg_origin)
         # 获取群组名称
         group_name = await self._get_group_name(group_id)
         group_info.group_name = group_name
