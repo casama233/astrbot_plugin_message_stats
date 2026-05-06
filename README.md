@@ -99,8 +99,10 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 | `timer_rank_type` | string | `daily` | 定时推送排行榜类型：`daily`/`total`/`weekly`/`monthly`/`yearly`/`lastyear` |
 | `milestone_enabled` | bool | `false` | 发言里程碑推送，用户发言达到里程碑次数时自动推送排行榜 |
 | `milestone_targets` | list | `[666, 1000, 2333, 5000, 6666, 10000, 23333]` | 触发推送的发言次数里程碑列表 |
-| `blocked_users` | list | `[]` | 屏蔽用户列表（支持QQ号或Telegram用户ID） |
-| `blocked_groups` | list | `[]` | 屏蔽群聊列表（支持QQ群号或Telegram群组ID） |
+| `blocked_users` | list | `[]` | 屏蔽用户列表 |
+| `blocked_groups` | list | `[]` | 屏蔽群聊列表 |
+| `tg_bot_token` | string | `` | Telegram Bot Token，填写后可获取TG用户真实头像。AstrBot不暴露适配器Token给插件，需独立配置。@BotFather创建Bot获取 |
+| `dc_bot_token` | string | `` | Discord Bot Token，填写后可获取DC用户真实头像。理由同上。Discord Developer Portal创建Bot获取 |
 | `llm_enabled` | bool | `false` | 启用 LLM 发言头衔分析，定时推送排行榜时生成个性化头衔 |
 | `llm_provider_id` | string | `` | LLM Provider ID，留空使用默认 |
 | `llm_system_prompt` | text | 默认提示词 | 头衔生成提示词模板，可自定义风格和颜色 |
@@ -148,12 +150,20 @@ astrbot_plugin_message_stats/
 ## 🌐 跨平台支持
 
 本插件现已支持以下平台：
-- **QQ（OneBot）** - 完整功能支持
-- **Telegram** - 完整功能支持
-- **Discord** - 完整功能支持
+- **QQ（OneBot）** - 完整功能支持，QQ 头像直接通过 qlogo.cn 获取
+- **Telegram** - 完整功能支持，配置 Bot Token 后可获取真实头像
+- **Discord** - 完整功能支持，配置 Bot Token 后可获取真实头像
 - **飞书（Lark/Feishu）** - 完整功能支持
 
+> **关于头像获取**：QQ 头像无需额外配置；TG/DC 需要在插件 Web 面板中独立填写 Bot Token（AstrBot 框架出于安全架构不会将适配器 Token 暴露给插件，插件需自行调用平台 API 获取头像，因此需要独立的 Token 配置）。未配置 Token 时自动使用彩色文字头像回退。
+
 ## 📝 更新日志
+
+### v1.9.1 (2026-05-07)
+- ✅ 跨平台真实头像获取（TG 通过 Bot API，DC 通过 CDN）
+- ✅ i18n 国际化文件全面优化（多行格式 + Token 说明）
+- ✅ 新增 `tg_bot_token` / `dc_bot_token` 配置项
+- ✅ LLM 头衔持久化，重启后保留
 
 ### v1.9.0 (2026-05-05)
 - ✅ Web 数据管理面板大升级（选择群组、彩色头像、群名展示）

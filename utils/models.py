@@ -445,6 +445,12 @@ class PluginConfig:
         self.llm_max_retries = 2
         self.llm_min_daily_messages = 0
         self.llm_enable_on_manual = False
+        # Telegram Bot Token（用于获取TG用户头像）
+        self.tg_bot_token = ""
+        
+        # Discord Bot Token（用于获取Discord用户头像）
+        self.dc_bot_token = ""
+        
         # 提示词版本号，版本升级时自动覆写
         self.llm_prompt_version = ""
     
@@ -493,7 +499,9 @@ class PluginConfig:
             "llm_max_retries": self.llm_max_retries,
             "llm_min_daily_messages": self.llm_min_daily_messages,
             "llm_enable_on_manual": self.llm_enable_on_manual,
-            "llm_prompt_version": self.llm_prompt_version
+            "llm_prompt_version": self.llm_prompt_version,
+            "tg_bot_token": self.tg_bot_token,
+            "dc_bot_token": self.dc_bot_token
         }
     
     @classmethod
@@ -570,6 +578,10 @@ class PluginConfig:
         config.llm_min_daily_messages = data.get("llm_min_daily_messages", 0)
         config.llm_enable_on_manual = data.get("llm_enable_on_manual", False)
         config.llm_prompt_version = data.get("llm_prompt_version", "")
+        
+        # Token 配置（不持久化到磁盘，从 AstrBot 配置读取，已在初始化时通过 config 传入）
+        config.tg_bot_token = data.get("tg_bot_token", "")
+        config.dc_bot_token = data.get("dc_bot_token", "")
         
         return config
 

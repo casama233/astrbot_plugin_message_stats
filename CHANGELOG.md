@@ -2,6 +2,13 @@
 
 ## v1.9.1 (2026-05-07)
 
+### ✨ 新功能
+
+- **跨平台真实头像获取**：新增 Telegram 和 Discord 用户头像获取支持。TG 通过 Bot API（getUserProfilePhotos → getFile）获取，DC 通过 Discord REST API 获取头像 hash 拼接 CDN URL。需在插件配置中独立填写 Bot Token（AstrBot 架构不暴露适配器 Token 给插件）。飞书和QQ原有头像逻辑保持不变。
+- **i18n 国际化文件全面优化**：zh-CN、en-US、ru-RU 三语言文件从单行 JSON 改为多行可读格式，新增 `tg_bot_token`/`dc_bot_token` 配置项的详细说明和 Token 重复配置的原因解释。
+- **配置项新增**：`_conf_schema.json` 新增 `tg_bot_token` 和 `dc_bot_token` 配置项，Web 面板可直接填写。
+- **新增依赖**：`aiohttp>=3.9.0`，用于异步 HTTP 请求获取头像。
+
 ### 🐛 Bug 修复
 
 - **LLM 头衔持久化**：新增 `llm_title`/`llm_title_color` 持久化字段，头衔保存到 JSON 文件中，重启后依然保留，不再每次重新生成。

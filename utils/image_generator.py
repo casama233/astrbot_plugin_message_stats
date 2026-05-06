@@ -14,8 +14,18 @@ import traceback
 import hashlib
 import json
 import uuid
+import html
+from urllib.parse import quote
 
 from astrbot.api import logger as astrbot_logger
+
+# 异步 HTTP 请求（用于获取 TG/Discord 头像）
+try:
+    import aiohttp
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    aiohttp = None
+    AIOHTTP_AVAILABLE = False
 
 # 从集中管理的常量模块导入图片生成配置
 from .constants import (
@@ -29,7 +39,6 @@ from .constants import (
 # Jinja2模板引擎
 try:
     from jinja2 import Template, Environment, select_autoescape, FileSystemLoader
-    import html  # 用于HTML转义安全防护
     JINJA2_AVAILABLE = True
 except ImportError:
     JINJA2_AVAILABLE = False
@@ -129,6 +138,9 @@ class ImageGenerator:
         
         # Jinja2环境将在initialize方法中初始化
         self.jinja_env = None
+        
+        # 头像缓存字典 {user_id: avatar_url}，每次生成图片时预获取，用完即弃
+        self._avatar_cache: Dict[str, str] = {}
     
     def _update_template_path(self):
         """根据主题配置更新模板路径（支持自动根据时间切换主题）"""
@@ -670,6 +682,9 @@ class ImageGenerator:
         if not users:
             return await self._generate_empty_html(group_info, title)
         
+        # 预获取非QQ平台用户的真实头像（TG/Discord），填充到 _avatar_cache
+        await self._prefetch_avatars(users, group_info)
+        
         # 使用批量处理优化性能（显式传入头衔映射）
         self._current_group_info = group_info
         processed_data = self._process_user_data_batch(users, current_user_id, titles_map, group_info)
@@ -1095,11 +1110,11 @@ class ImageGenerator:
         if nickname and nickname.strip():
             letter = nickname.strip()[0]
         color = ImageGenerator._get_avatar_color(seed or 'x')
-        import html as _html
-        svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640"><circle cx="320" cy="320" r="320" fill="{color}"/><text x="320" y="320" text-anchor="middle" dominant-baseline="central" font-size="280" font-weight="700" font-family="Microsoft YaHei,sans-serif" fill="white">{_html.escape(letter)}</text></svg>'
-        from urllib.parse import quote
+        svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640"><circle cx="320" cy="320" r="320" fill="{color}"/><text x="320" y="320" text-anchor="middle" dominant-baseline="central" font-size="280" font-weight="700" font-family="Microsoft YaHei,sans-serif" fill="white">{html.escape(letter)}</text></svg>'
         encoded = quote(svg)
         return f"data:image/svg+xml,{encoded}"
+
+    # ========== 跨平台头像获取（TG / Discord / 飞书 / QQ） ==========
 
     @staticmethod
     def _detect_platform(group_id: str) -> str:
@@ -1133,14 +1148,170 @@ class ImageGenerator:
         
         return 'unknown'
 
+    async def _prefetch_avatars(self, users: List[UserData], group_info: GroupInfo):
+        """预获取本批用户的头像URL，填充到 _avatar_cache
+        
+        在生成HTML之前调用，异步并发获取TG/Discord/飞书的真实头像。
+        获取失败或未配置Token的用户会自动回退到彩色文字头像。
+        
+        Args:
+            users: 用户数据列表
+            group_info: 群组信息
+        """
+        self._avatar_cache.clear()
+        group_id_str = str(group_info.group_id) if group_info else ""
+        platform = self._detect_platform(group_id_str)
+        
+        # QQ 不需要预获取，直接通过 qlogo.cn 拼接
+        if platform == 'qq':
+            return
+        
+        # 飞书：保留之前逻辑（回退彩色文字头像）
+        if platform == 'feishu':
+            return
+        
+        if platform == 'telegram':
+            await self._prefetch_tg_avatars(users)
+        elif platform == 'discord':
+            await self._prefetch_dc_avatars(users)
+    
+    async def _prefetch_tg_avatars(self, users: List[UserData]):
+        """预获取 Telegram 用户头像
+        
+        使用 TG Bot API 获取用户最新的头像文件路径，拼接为可下载的 URL。
+        API 调用链路：getUserProfilePhotos -> getFile -> 拼接下载链接
+        """
+        tg_token = getattr(self.config, 'tg_bot_token', '')
+        if not tg_token or not AIOHTTP_AVAILABLE:
+            self.logger.debug("TG Bot Token 未配置或 aiohttp 不可用，跳过 TG 头像预获取")
+            return
+        
+        self.logger.info(f"开始预获取 {len(users)} 个 TG 用户头像...")
+        success_count = 0
+        
+        async def fetch_single(user_id: str):
+            """获取单个用户的头像 URL"""
+            try:
+                # 步骤1: 获取用户头像列表
+                photos_url = f"https://api.telegram.org/bot{tg_token}/getUserProfilePhotos"
+                params = {"user_id": int(float(user_id)), "limit": 1}
+                
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                    async with session.get(photos_url, params=params) as resp:
+                        if resp.status != 200:
+                            return
+                        data = await resp.json()
+                    
+                    if not data.get("ok") or not data.get("result", {}).get("photos"):
+                        return
+                    
+                    # 取最新的头像（数组第一个），取最大分辨率的 file_id（数组最后一个）
+                    latest_photos = data["result"]["photos"][0]
+                    file_id = latest_photos[-1]["file_id"]
+                    
+                    # 步骤2: 获取文件路径
+                    get_file_url = f"https://api.telegram.org/bot{tg_token}/getFile"
+                    async with session.get(get_file_url, params={"file_id": file_id}) as resp2:
+                        if resp2.status != 200:
+                            return
+                        file_data = await resp2.json()
+                    
+                    if not file_data.get("ok") or not file_data.get("result", {}).get("file_path"):
+                        return
+                    
+                    file_path = file_data["result"]["file_path"]
+                    
+                    # 步骤3: 拼接最终下载链接
+                    avatar_url = f"https://api.telegram.org/file/bot{tg_token}/{file_path}"
+                    self._avatar_cache[user_id] = avatar_url
+                    return True
+            except Exception as e:
+                self.logger.debug(f"获取 TG 头像失败 (user_id={user_id}): {e}")
+                return None
+        
+        # 并发获取所有用户头像
+        tasks = [fetch_single(u.user_id) for u in users if u.user_id]
+        results = await asyncio.gather(*tasks)
+        success_count = sum(1 for r in results if r)
+        
+        if success_count > 0:
+            self.logger.info(f"TG 头像预获取完成: {success_count}/{len(users)} 成功")
+        else:
+            self.logger.debug("TG 头像预获取：所有用户均未获取到头像，将使用彩色文字头像回退")
+    
+    async def _prefetch_dc_avatars(self, users: List[UserData]):
+        """预获取 Discord 用户头像
+        
+        通过 Discord API 获取用户信息，提取 avatar hash，拼接 CDN URL。
+        如果用户的 avatar hash 以 a_ 开头，使用 GIF 格式。
+        """
+        dc_token = getattr(self.config, 'dc_bot_token', '')
+        if not dc_token or not AIOHTTP_AVAILABLE:
+            self.logger.debug("Discord Bot Token 未配置或 aiohttp 不可用，跳过 DC 头像预获取")
+            return
+        
+        self.logger.info(f"开始预获取 {len(users)} 个 Discord 用户头像...")
+        success_count = 0
+        
+        # Discord 需要 Bot 认证头
+        headers = {
+            "Authorization": f"Bot {dc_token}",
+            "User-Agent": "DiscordBot (astrbot_plugin_message_stats, 1.0)"
+        }
+        
+        async def fetch_single(user_id: str):
+            """获取单个 Discord 用户的头像 URL"""
+            try:
+                user_url = f"https://discord.com/api/v10/users/{int(float(user_id))}"
+                
+                async with aiohttp.ClientSession(
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as session:
+                    async with session.get(user_url) as resp:
+                        if resp.status != 200:
+                            return
+                        user_data = await resp.json()
+                    
+                    avatar_hash = user_data.get("avatar")
+                    if not avatar_hash:
+                        # 用户没有设置头像，使用默认头像算法
+                        # Discord 默认头像：user_id 右移 22 位后对 6（默认头像数量）取模
+                        try:
+                            uid_int = int(float(user_id))
+                            default_index = (uid_int >> 22) % 6
+                            avatar_url = f"https://cdn.discordapp.com/embed/avatars/{default_index}.png"
+                            self._avatar_cache[user_id] = avatar_url
+                            return True
+                        except (ValueError, OverflowError):
+                            return
+                    
+                    # 有自定义头像：判断是否为 GIF（a_ 开头）
+                    ext = "gif" if avatar_hash.startswith("a_") else "png"
+                    avatar_url = f"https://cdn.discordapp.com/avatars/{int(float(user_id))}/{avatar_hash}.{ext}"
+                    self._avatar_cache[user_id] = avatar_url
+                    return True
+            except Exception as e:
+                self.logger.debug(f"获取 DC 头像失败 (user_id={user_id}): {e}")
+                return None
+        
+        # 并发获取所有用户头像
+        tasks = [fetch_single(u.user_id) for u in users if u.user_id]
+        results = await asyncio.gather(*tasks)
+        success_count = sum(1 for r in results if r)
+        
+        if success_count > 0:
+            self.logger.info(f"DC 头像预获取完成: {success_count}/{len(users)} 成功")
+        else:
+            self.logger.debug("DC 头像预获取：所有用户均未获取到头像，将使用彩色文字头像回退")
+
     def _get_avatar_url(self, user_id: str, nickname: str = "", group_info=None) -> str:
         """获取用户头像URL
         
-        根据群ID特征精确识别平台：
-        - QQ（5-10位正数）→ qlogo.cn 真实头像
-        - Telegram（负数/-100开头）→ 彩色文字头像
-        - Discord（18-19位正数）→ 彩色文字头像
-        - 飞书（oc_开头）→ 彩色文字头像
+        优先级：
+        1. 预获取缓存（_avatar_cache，由 _prefetch_avatars 填充的 TG/Discord/飞书真实头像）
+        2. QQ 平台：qlogo.cn 真实头像
+        3. 回退：彩色文字 SVG 头像
         
         Args:
             user_id: 用户ID
@@ -1154,11 +1325,16 @@ class ImageGenerator:
         group_id_str = str(group_info.group_id) if group_info else ""
         platform = self._detect_platform(group_id_str)
         
-        # 仅QQ使用 qlogo 真实头像
+        # 优先级1: 预获取缓存（TG/Discord 的真实头像）
+        cached_url = self._avatar_cache.get(user_id_str)
+        if cached_url:
+            return cached_url
+        
+        # 优先级2: QQ 平台使用 qlogo.cn 真实头像
         if platform == 'qq':
             return f"https://q1.qlogo.cn/g?b=qq&nk={user_id_str}&s=640"
         
-        # 其他平台一律回退彩色文字头像
+        # 优先级3: 回退彩色文字头像（飞书、未知平台、或预获取失败的 TG/Discord）
         return self._generate_avatar_svg_data_uri(nickname, user_id_str)
     
     @safe_file_operation(default_return="")
