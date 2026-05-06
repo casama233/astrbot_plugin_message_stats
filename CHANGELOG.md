@@ -1,5 +1,18 @@
 # 更新日志
 
+## v1.9.2 (2026-05-07)
+
+### 🐛 Bug 修复
+
+- **临时文件泄漏全面修复**：`_check_milestone()`、`show_my_milestone()`、`_push_to_group()` 三处清理代码不在 try/finally 中，send_message 抛异常时跳过清理导致 tmp 文件残留。已修复：全部改用 try/finally 确保清理。
+- **异常关闭时 tmp 文件残留**：插件被 kill -9/OOM/断电时 finally 不会执行。已修复：新增 `_cleanup_stale_temp_files()`，启动时扫描清理。
+- **删除冗余的 `_calculate_daily_rank` 方法**：与 `_calculate_period_rank_optimized` 逻辑重复，统一走批量优化路径。
+
+### 🔧 其他改进
+
+- **main.py 精简**：删除 10 个无用的委托包装方法，合并重复 except 块，精简 docstring。
+- **版本号更新至 1.9.2**：main.py 和 metadata.yaml 同步更新。
+
 ## v1.9.1 (2026-05-07)
 
 ### ✨ 新功能
