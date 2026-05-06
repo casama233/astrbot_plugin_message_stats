@@ -569,7 +569,7 @@ class ImageGenerator:
                 return None
             
             # 准备模板数据
-            avatar_url = self._get_avatar_url(user_id, "qq")
+            avatar_url = self._get_avatar_url(user_id, nickname)
             group_name = group_info.group_name or f"群{group_info.group_id}"
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
@@ -751,7 +751,7 @@ class ImageGenerator:
                 'nickname': user.nickname,
                 'title': user_title,
                 'title_color': user_title_color,
-                'avatar_url': self._get_avatar_url(user.user_id, "qq"),
+                'avatar_url': self._get_avatar_url(user.user_id, user.nickname),
                 'total': user_messages,
                 'percentage': (user_messages / total_messages * 100) if total_messages > 0 else 0,
                 'last_date': user.last_date or "未知",
@@ -768,7 +768,7 @@ class ImageGenerator:
                 user_items.append({
                     'rank': current_rank,
                     'nickname': current_user_data.nickname,
-                    'avatar_url': self._get_avatar_url(current_user_data.user_id, "qq"),
+                    'avatar_url': self._get_avatar_url(current_user_data.user_id, current_user_data.nickname),
                     'total': current_user_messages,
                     'percentage': (current_user_messages / total_messages * 100) if total_messages > 0 else 0,
                     'last_date': current_user_data.last_date or "未知",
@@ -1036,7 +1036,7 @@ class ImageGenerator:
         
         # 如果头像URL无效，使用默认头像
         if not safe_avatar_url:
-            safe_avatar_url = self._get_avatar_url(str(item_data.get('user_id', '0')), "qq")
+            safe_avatar_url = self._get_avatar_url(str(item_data.get('user_id', '0')), str(item_data.get('nickname', '')))
         
         content = {
             'nickname': safe_nickname,
@@ -1068,35 +1068,33 @@ class ImageGenerator:
         url = url.replace('<', '').replace('>', '').replace('"', '').replace("'", '')
         return url
 
-    def _get_avatar_url(self, user_id: str, platform: str = "qq") -> str:
-        """获取用户头像URL
-        
-        Args:
-            user_id (str): 用户ID
-            platform (str): 平台类型，支持 'qq', 'telegram', 'discord' 等
-            
-        Returns:
-            str: 头像URL
-        """
-        # 支持多种平台的头像服务
-        avatar_services = {
-            "qq": "https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640",
-            "telegram": "https://telegram.org/img/t_logo.png",  # Telegram默认头像
-            "discord": "https://cdn.discordapp.com/embed/avatars/{avatar_id}.png",  # Discord默认头像
-            "default": "https://via.placeholder.com/640x640?text=Avatar"  # 通用默认头像
-        }
-        
-        service_url = avatar_services.get(platform, avatar_services["default"])
-        
-        # 安全计算 avatar_id：处理负数ID（Telegram）和非数字字符串ID
-        try:
-            uid_int = abs(int(user_id))  # 取绝对值，确保为正数
-            avatar_id = uid_int % 5
-        except (ValueError, TypeError):
-            # 如果 user_id 不是有效数字，使用默认值
-            avatar_id = 0
-        
-        return service_url.format(user_id=user_id, avatar_id=avatar_id)
+    _AVATAR_COLORS = ['#F59E0B','#3B82F6','#8B5CF6','#EC4899','#10B981',
+                      '#EF4444','#14B8A6','#F97316','#6366F1','#84CC16',
+                      '#06B6D4','#D946EF','#0EA5E9','#EAB308','#A855F7']
+
+    @staticmethod
+    def _get_avatar_color(seed: str) -> str:
+        h = 0
+        for ch in seed:
+            h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+        colors = ImageGenerator._AVATAR_COLORS
+        return colors[h % len(colors)]
+
+    @staticmethod
+    def _generate_avatar_svg_data_uri(nickname: str, seed: str) -> str:
+        letter = '?'
+        if nickname and nickname.strip():
+            letter = nickname.strip()[0]
+        color = ImageGenerator._get_avatar_color(seed or 'x')
+        import html as _html
+        svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640"><circle cx="320" cy="320" r="320" fill="{color}"/><text x="320" y="320" text-anchor="middle" dominant-baseline="central" font-size="280" font-weight="700" font-family="Microsoft YaHei,sans-serif" fill="white">{_html.escape(letter)}</text></svg>'
+        from urllib.parse import quote
+        encoded = quote(svg)
+        return f"data:image/svg+xml,{encoded}"
+
+    def _get_avatar_url(self, user_id: str, nickname: str = "") -> str:
+        """生成彩色首字母 SVG data URI 头像（跨平台，不依赖任何头像服务）"""
+        return self._generate_avatar_svg_data_uri(nickname, user_id)
     
     @safe_file_operation(default_return="")
     async def _load_html_template(self) -> str:
