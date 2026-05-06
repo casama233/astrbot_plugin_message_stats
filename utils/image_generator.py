@@ -1104,32 +1104,19 @@ class ImageGenerator:
     def _get_avatar_url(self, user_id: str, nickname: str = "", group_info=None) -> str:
         """获取用户头像URL
         
-        根据群ID正负数判断平台：
-        - 正数群ID（QQ等）→ 使用 qlogo.cn 获取真实头像
-        - 负数群ID（Telegram等）→ unified_msg_origin不可靠，回退彩色首字母 SVG data URI
+        统一使用彩色首字母 SVG data URI 作为头像，不依赖任何外部头像服务。
+        原因：无法可靠区分 QQ/Discord/飞书等平台（群ID都可能是正数），
+        用 qlogo.cn 获取非QQ平台头像会返回错误的随机头像。
         
         Args:
-            user_id: 用户ID
-            nickname: 用户昵称（用于回退头像的首字母）
+            user_id: 用户ID（用于颜色种子）
+            nickname: 用户昵称（用于提取首字母）
             group_info: 群组信息
         
         Returns:
-            str: 头像URL
+            str: 头像URL（data URI格式的SVG）
         """
-        user_id_str = str(user_id)
-        
-        # 从 group_id 判断平台
-        group_id_str = ""
-        if group_info:
-            group_id_str = str(group_info.group_id)
-        
-        # 正数群ID → QQ平台（或其他正数ID平台），尝试用 qlogo 获取头像
-        # 负数群ID → Telegram 等平台，直接回退彩色文字头像
-        if group_id_str.lstrip('-').isdigit() and not group_id_str.startswith('-'):
-            return f"https://q1.qlogo.cn/g?b=qq&nk={user_id_str}&s=640"
-        
-        # 其他平台：回退彩色首字母文字头像
-        return self._generate_avatar_svg_data_uri(nickname, user_id_str)
+        return self._generate_avatar_svg_data_uri(nickname, str(user_id))
     
     @safe_file_operation(default_return="")
     async def _load_html_template(self) -> str:
