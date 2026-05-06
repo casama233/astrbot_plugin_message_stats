@@ -11,7 +11,7 @@ pydantic>=2.8.0
 # 图片生成
 playwright>=1.45.0
 
-# JSON处理增强
+# JSON处理增强（替代标准 json，性能提升 2-5 倍）
 orjson>=3.10.0
 
 # 日期时间处理

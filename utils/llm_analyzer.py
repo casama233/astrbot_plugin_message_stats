@@ -61,6 +61,10 @@ class LLMAnalyzer:
         logger: 日志记录器
     """
 
+    # ---------- 并发控制（优化B） ----------
+    _global_semaphore = asyncio.Semaphore(3)  # 最多3个并发 LLM 请求
+    _total_concurrent = 0
+
     def __init__(
         self,
         context,
@@ -192,9 +196,10 @@ class LLMAnalyzer:
         return {}, self.last_token_usage
 
     async def _call_llm(self, prompt: str) -> Tuple[Optional[str], Dict[str, int]]:
-        """通过 AstrBot Provider 调用 LLM
+        """通过 AstrBot Provider 调用 LLM（带并发控制）
 
         使用 context.llm_generate() 调用 AstrBot 已配置的 LLM。
+        通过类级别 Semaphore 限制最多 3 个并发请求。
 
         Args:
             prompt (str): 发送给 LLM 的提示词
@@ -203,64 +208,72 @@ class LLMAnalyzer:
             Tuple[Optional[str], Dict[str, int]]: (LLM返回文本, token用量统计)
         """
         token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-        try:
-            llm_kwargs = {
-                "prompt": prompt,
-                "system_prompt": self.system_prompt,
-            }
+        
+        # 并发控制：获取信号量，最多3个并发 LLM 请求
+        async with self._global_semaphore:
+            LLMAnalyzer._total_concurrent += 1
+            if LLMAnalyzer._total_concurrent > 3:
+                self.logger.info(f"⏳ LLM 并发数已达上限，排队等待中... (当前并发: {LLMAnalyzer._total_concurrent})")
+            try:
+                llm_kwargs = {
+                    "prompt": prompt,
+                    "system_prompt": self.system_prompt,
+                }
 
-            if self.provider_id and self.provider_id.strip():
-                try:
-                    provider = self.context.get_provider_by_id(
-                        provider_id=self.provider_id.strip()
-                    )
-                    if provider:
-                        llm_kwargs["chat_provider_id"] = self.provider_id.strip()
-                        self.logger.info(f"使用指定 Provider: {self.provider_id}")
-                    else:
-                        self.logger.warning(
-                            f"指定的 Provider '{self.provider_id}' 不存在，使用默认 Provider"
+                if self.provider_id and self.provider_id.strip():
+                    try:
+                        provider = self.context.get_provider_by_id(
+                            provider_id=self.provider_id.strip()
                         )
-                except Exception as e:
-                    self.logger.warning(
-                        f"获取 Provider '{self.provider_id}' 失败: {e}，使用默认 Provider"
-                    )
+                        if provider:
+                            llm_kwargs["chat_provider_id"] = self.provider_id.strip()
+                            self.logger.info(f"使用指定 Provider: {self.provider_id}")
+                        else:
+                            self.logger.warning(
+                                f"指定的 Provider '{self.provider_id}' 不存在，使用默认 Provider"
+                            )
+                    except Exception as e:
+                        self.logger.warning(
+                            f"获取 Provider '{self.provider_id}' 失败: {e}，使用默认 Provider"
+                        )
 
-            self.logger.debug("调用 LLM generate...")
-            resp = await self.context.llm_generate(**llm_kwargs)
+                self.logger.debug("调用 LLM generate...")
+                resp = await self.context.llm_generate(**llm_kwargs)
 
-            if resp is None:
-                self.logger.warning("LLM 返回 None")
+                if resp is None:
+                    self.logger.warning("LLM 返回 None")
+                    return None, token_usage
+
+                # 提取 token 用量
+                if hasattr(resp, "usage") and resp.usage:
+                    usage = resp.usage
+                    if hasattr(usage, "total"):
+                        token_usage["total_tokens"] = getattr(usage, "total", 0) or 0
+                        token_usage["prompt_tokens"] = getattr(usage, "input", 0) or 0
+                        token_usage["completion_tokens"] = getattr(usage, "output", 0) or 0
+
+                # 从响应中提取文本
+                if hasattr(resp, "completion_text"):
+                    text = resp.completion_text
+                elif hasattr(resp, "text"):
+                    text = resp.text
+                elif isinstance(resp, str):
+                    text = resp
+                else:
+                    text = str(resp)
+
+                text = text.strip()
+                if text:
+                    return text, token_usage
+
+                self.logger.warning("LLM 返回文本为空")
                 return None, token_usage
 
-            # 提取 token 用量
-            if hasattr(resp, "usage") and resp.usage:
-                usage = resp.usage
-                if hasattr(usage, "total"):
-                    token_usage["total_tokens"] = getattr(usage, "total", 0) or 0
-                    token_usage["prompt_tokens"] = getattr(usage, "input", 0) or 0
-                    token_usage["completion_tokens"] = getattr(usage, "output", 0) or 0
-
-            # 从响应中提取文本
-            if hasattr(resp, "completion_text"):
-                text = resp.completion_text
-            elif hasattr(resp, "text"):
-                text = resp.text
-            elif isinstance(resp, str):
-                text = resp
-            else:
-                text = str(resp)
-
-            text = text.strip()
-            if text:
-                return text, token_usage
-
-            self.logger.warning("LLM 返回文本为空")
-            return None, token_usage
-
-        except Exception as e:
-            self.logger.error(f"LLM 调用异常: {e}")
-            raise
+            except Exception as e:
+                self.logger.error(f"LLM 调用异常: {e}")
+                raise
+            finally:
+                LLMAnalyzer._total_concurrent -= 1
 
     def _parse_titles(
         self,

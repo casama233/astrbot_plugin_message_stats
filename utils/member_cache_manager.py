@@ -28,7 +28,9 @@ class MemberCacheManager:
     
     使用异步锁防止缓存击穿：同一时间对同一用户ID只会发起一次API请求。
     
-    内存安全：
+    内存安全（优化C：冷热分离）：
+    - 活跃群组保持标准 TTL（5分钟）
+    - 僵尸群组（24小时无消息）主动清理，释放内存
     - 所有缓存字典均使用 TTLCache 或限制大小
     - 异步锁字典定期清理，防止无限增长
     - 里程碑缓存使用独立的小容量 TTLCache
@@ -38,6 +40,10 @@ class MemberCacheManager:
     _LOCK_CLEANUP_INTERVAL = 3600  # 1小时清理一次
     # 锁最大存活时间（秒）
     _LOCK_MAX_AGE = 7200  # 2小时无访问则清理
+    
+    # ---------- 冷热分离配置（优化C） ----------
+    _ZOMBIE_THRESHOLD = 86400  # 24小时无消息视为僵尸群组
+    _ZOMBIE_CLEANUP_INTERVAL = 7200  # 每2小时检查一次僵尸群组
 
     def __init__(self, context, cache_ttl: int = 300, nickname_cache_ttl: int = 600):
         """初始化缓存管理器
@@ -48,6 +54,7 @@ class MemberCacheManager:
             nickname_cache_ttl: 昵称缓存TTL（秒），默认600秒（10分钟）
         """
         self.context = context
+        self._cache_ttl = cache_ttl
         
         # 群成员列表缓存（TTLCache，用于批量操作）
         self.group_members_cache = TTLCache(maxsize=100, ttl=cache_ttl)
@@ -69,10 +76,57 @@ class MemberCacheManager:
         self._lock_access_time: Dict[str, float] = {}
         # 上次清理时间
         self._last_lock_cleanup: float = time.time()
+        
+        # ---------- 冷热分离缓存（优化C） ----------
+        # 活跃群组最后访问时间 {group_id: timestamp}
+        self._group_last_active: Dict[str, float] = {}
+        # 上次僵尸群组清理时间
+        self._last_zombie_cleanup: float = time.time()
+    
+    # ========== 冷热分离方法（优化C） ==========
+    
+    def mark_group_active(self, group_id: str):
+        """标记群组为活跃状态（收到消息时调用）
+        
+        Args:
+            group_id: 群组ID
+        """
+        self._group_last_active[str(group_id)] = time.time()
+    
+    def _cleanup_zombie_groups(self):
+        """清理僵尸群组的缓存数据（24小时无消息的群组）"""
+        now = time.time()
+        if now - self._last_zombie_cleanup < self._ZOMBIE_CLEANUP_INTERVAL:
+            return
+        self._last_zombie_cleanup = now
+        
+        zombie_threshold = now - self._ZOMBIE_THRESHOLD
+        zombie_groups = [
+            gid for gid, last_active in self._group_last_active.items()
+            if last_active < zombie_threshold
+        ]
+        
+        for gid in zombie_groups:
+            cache_key = f"group_members_{gid}"
+            dict_key = f"group_members_dict_{gid}"
+            if cache_key in self.group_members_cache:
+                del self.group_members_cache[cache_key]
+            if dict_key in self.group_members_dict_cache:
+                del self.group_members_dict_cache[dict_key]
+            del self._group_last_active[gid]
+            
+            # 同时清理该群的成员锁
+            if gid in self._members_locks:
+                del self._members_locks[gid]
+                self._lock_access_time.pop(f"members_{gid}", None)
+        
+        if zombie_groups:
+            logger.info(f"🧹 清理 {len(zombie_groups)} 个僵尸群组缓存")
+    
+    # ========== 原生方法保持不变 ==========
     
     def _get_fetch_lock(self, user_id: str) -> asyncio.Lock:
         """获取或创建用户ID对应的异步锁"""
-        # 定期清理过期锁
         self._cleanup_locks_if_needed()
         
         if user_id not in self._fetch_locks:
@@ -82,7 +136,6 @@ class MemberCacheManager:
     
     def _get_members_lock(self, group_id: str) -> asyncio.Lock:
         """获取或创建群组ID对应的异步锁"""
-        # 定期清理过期锁
         self._cleanup_locks_if_needed()
         
         if group_id not in self._members_locks:
@@ -99,7 +152,6 @@ class MemberCacheManager:
         self._last_lock_cleanup = now
         cleanup_threshold = now - self._LOCK_MAX_AGE
         
-        # 清理 fetch_locks
         expired_fetch = [
             uid for uid in list(self._fetch_locks.keys())
             if self._lock_access_time.get(uid, 0) < cleanup_threshold
@@ -108,7 +160,6 @@ class MemberCacheManager:
             del self._fetch_locks[uid]
             self._lock_access_time.pop(uid, None)
         
-        # 清理 members_locks
         expired_members = [
             gid for gid in list(self._members_locks.keys())
             if self._lock_access_time.get(f"members_{gid}", 0) < cleanup_threshold
@@ -130,27 +181,23 @@ class MemberCacheManager:
         2. 从群成员字典缓存获取（中等效率）
         3. 从API获取（带异步锁防止缓存击穿）
         4. 返回默认昵称
-        
-        Args:
-            event: 消息事件对象
-            group_id: 群组ID
-            user_id: 用户ID
-            
-        Returns:
-            用户的显示昵称，如果都失败则返回 "用户{user_id}"
         """
+        group_id_str = str(group_id)
+        self.mark_group_active(group_id_str)
+        self._cleanup_zombie_groups()
+        
         # 步骤1: 从昵称缓存获取
         nickname = self._get_from_nickname_cache(user_id)
         if nickname:
             return nickname
         
         # 步骤2: 从群成员字典缓存获取
-        nickname = self._get_from_dict_cache(group_id, user_id)
+        nickname = self._get_from_dict_cache(group_id_str, user_id)
         if nickname:
             return nickname
         
         # 步骤3: 从API获取（带异步锁防止缓存击穿）
-        nickname = await self._fetch_and_cache_from_api(event, group_id, user_id)
+        nickname = await self._fetch_and_cache_from_api(event, group_id_str, user_id)
         if nickname:
             return nickname
         
@@ -174,11 +221,7 @@ class MemberCacheManager:
         return PlatformHelper.get_display_name_from_member(member)
     
     def clear_user_cache(self, user_id: Optional[str] = None):
-        """清理用户昵称缓存
-        
-        Args:
-            user_id: 指定用户ID，为None时清理所有
-        """
+        """清理用户昵称缓存"""
         if user_id:
             nickname_cache_key = f"nickname_{user_id}"
             if nickname_cache_key in self.user_nickname_cache:
@@ -189,32 +232,19 @@ class MemberCacheManager:
         logger.info(f"清理用户缓存: {user_id or '全部'}")
     
     async def refresh_group_cache(self, event: AstrMessageEvent, group_id: str) -> bool:
-        """刷新指定群的成员缓存
-        
-        清除缓存后重新从API获取最新数据。
-        
-        Args:
-            event: 消息事件对象
-            group_id: 群组ID
-            
-        Returns:
-            bool: 是否成功刷新
-        """
+        """刷新指定群的成员缓存"""
         try:
-            # 清除特定群的成员缓存
             cache_key = f"group_members_{group_id}"
             if cache_key in self.group_members_cache:
                 del self.group_members_cache[cache_key]
             
-            # 清除群成员字典缓存
             dict_cache_key = f"group_members_dict_{group_id}"
             if dict_cache_key in self.group_members_dict_cache:
                 del self.group_members_dict_cache[dict_cache_key]
             
-            # 清除昵称缓存
             self.clear_user_cache()
+            self.mark_group_active(group_id)
             
-            # 重新从API获取
             members_info = await self._fetch_group_members_from_api(event, group_id)
             return members_info is not None
         except Exception as e:
@@ -241,12 +271,7 @@ class MemberCacheManager:
         }
     
     def update_nickname_cache(self, user_id: str, nickname: str):
-        """更新昵称缓存
-        
-        Args:
-            user_id: 用户ID
-            nickname: 昵称
-        """
+        """更新昵称缓存"""
         nickname_cache_key = f"nickname_{user_id}"
         self.user_nickname_cache[nickname_cache_key] = nickname
     
@@ -256,7 +281,7 @@ class MemberCacheManager:
         return self.user_nickname_cache.get(nickname_cache_key)
     
     def is_milestone_cached(self, group_id: str, user_id: str, count: int) -> bool:
-        """检查里程碑是否已缓存（防止重复推送）"""
+        """检查里程碑是否已缓存"""
         milestone_cache_key = f"milestone_{group_id}_{user_id}_{count}"
         return milestone_cache_key in self._milestone_cache
     
@@ -272,6 +297,7 @@ class MemberCacheManager:
         self.user_nickname_cache.clear()
         self._fetch_locks.clear()
         self._members_locks.clear()
+        self._group_last_active.clear()
         logger.info("所有缓存已清理")
     
     # ========== 私有方法 ==========
@@ -290,7 +316,6 @@ class MemberCacheManager:
                 member = members_dict[user_id]
                 display_name = self.get_display_name_from_member(member)
                 if display_name:
-                    # 回填到昵称缓存
                     self.update_nickname_cache(user_id, display_name)
                     return display_name
         return None
@@ -299,7 +324,6 @@ class MemberCacheManager:
         """从API获取群成员信息并缓存（带异步锁防止缓存击穿）"""
         lock = self._get_fetch_lock(user_id)
         async with lock:
-            # 双重检查：获取锁后再次检查缓存
             cached = self._get_from_nickname_cache(user_id)
             if cached:
                 return cached
@@ -308,11 +332,9 @@ class MemberCacheManager:
             if cached:
                 return cached
             
-            # 真正执行API请求
             try:
                 members_info = await self._fetch_group_members_from_api(event, group_id)
                 if members_info:
-                    # 重建字典缓存
                     dict_cache_key = f"group_members_dict_{group_id}"
                     members_dict = {}
                     for m in members_info:
@@ -321,7 +343,6 @@ class MemberCacheManager:
                             members_dict[uid] = m
                     self.group_members_dict_cache[dict_cache_key] = members_dict
                     
-                    # 查找用户
                     if user_id in members_dict:
                         member = members_dict[user_id]
                         display_name = self.get_display_name_from_member(member)
@@ -341,7 +362,6 @@ class MemberCacheManager:
         """从API获取群成员（跨平台通用，带群级别异步锁）"""
         lock = self._get_members_lock(group_id)
         async with lock:
-            # 双重检查缓存
             cache_key = f"group_members_{group_id}"
             if cache_key in self.group_members_cache:
                 return self.group_members_cache[cache_key]

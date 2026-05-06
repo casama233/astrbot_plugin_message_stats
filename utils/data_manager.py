@@ -1033,7 +1033,7 @@ class DataManager:
         except (IOError, OSError) as e:
             self.logger.error(f"数据清理时文件操作失败: {e}")
         except (ValueError, TypeError) as e:
-            self
+            self.logger.error(f"数据清理时参数错误: {e}")
     
     async def flush_all(self):
         """立即将所有脏数据写入磁盘（插件关闭时调用）

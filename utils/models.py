@@ -441,6 +441,7 @@ class PluginConfig:
         # LLM 头衔分析配置
         self.llm_enabled = False
         self.llm_provider_id = ""
+        # 提示词默认空，由 LLMAnalyzer 的 DEFAULT_SYSTEM_PROMPT 兜底
         self.llm_system_prompt = ""
         self.llm_max_retries = 2
         self.llm_min_daily_messages = 0

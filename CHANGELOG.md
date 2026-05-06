@@ -7,11 +7,29 @@
 - **临时文件泄漏全面修复**：`_check_milestone()`、`show_my_milestone()`、`_push_to_group()` 三处清理代码不在 try/finally 中，send_message 抛异常时跳过清理导致 tmp 文件残留。已修复：全部改用 try/finally 确保清理。
 - **异常关闭时 tmp 文件残留**：插件被 kill -9/OOM/断电时 finally 不会执行。已修复：新增 `_cleanup_stale_temp_files()`，启动时扫描清理。
 - **删除冗余的 `_calculate_daily_rank` 方法**：与 `_calculate_period_rank_optimized` 逻辑重复，统一走批量优化路径。
+- **`image_generator.py` 缺少 `await`**：`_load_user_item_macro_template()` 调用缺少 `await`，导致用户条目宏模板无法正确加载。
+- **`data_manager.py` 不完整语句**：`cleanup_old_data()` 方法中 `except (ValueError, TypeError): self` 为无意义语句。
+- **`image_generator.py` `await` 在同步方法中**：`_generate_user_item_html_safe()` 是同步方法，错误地使用了 `await`，导致插件加载报错 `await outside async function`。
+- **Web 面板头衔为空**：`page_stats` API 读取了运行时字段 `display_title`，持久化存储的是 `llm_title`，Web 页面直接读文件时头衔为空。
+- **Web 面板头衔颜色缺失**：`page_stats` 未返回 `title_color` 字段，前端用固定 CSS 颜色渲染，与排行榜图片不一致。
+- **Web 设置中 llm_system_prompt 为空**：用户保存配置后空值被持久化，升级插件也不会被 schema 默认值覆盖。
 
-### 🔧 其他改进
+### 🔧 性能优化
 
-- **main.py 精简**：删除 10 个无用的委托包装方法，合并重复 except 块，精简 docstring。
-- **版本号更新至 1.9.2**：main.py 和 metadata.yaml 同步更新。
+- **`_is_blocked_user/group` 改用 set 缓存**：将屏蔽用户/群聊列表预缓存为 `set`，O(n) 列表遍历 → O(1) 集合查找。
+- **`_check_milestone` 里程碑 set 缓存**：将 `milestone_targets` 缓存为 `_milestone_set`，避免每次创建 O(n) 的 set。
+- **切换为 orjson**：替换标准库 `json` 为 `orjson`，序列化/反序列化性能提升 2-5 倍。
+
+### 🧹 代码简化与清理
+
+- **简化命令方法的异常处理**：将 `_record_message_stats`、`set_rank_count` 等方法的 11 个 `except` 子句合并为统一的 `except Exception`，代码缩减 60+ 行。
+- **删除未使用的 `_handle_command_exception` 方法**：该公共异常处理方法从未被调用，已删除。
+- **清理重复的局部 import**：删除 `_load_unified_msg_origins`、`_save_unified_msg_origins`、`_load_group_names`、`_save_group_names` 中的 `import json`，以及 `_check_milestone` 中的 `import aiofiles`。
+- **`_conf_schema.json` 类型统一**：`if_send_pic` 配置项改用 `{value, label}` 格式，默认值改为 int 类型 0/1。
+
+### ✅ 新增测试
+
+- **添加单元测试**：新增 `test_plugin.py`，覆盖数据模型、验证器、缓存状态等核心逻辑。
 
 ## v1.9.1 (2026-05-07)
 

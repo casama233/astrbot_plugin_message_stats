@@ -295,7 +295,8 @@ if (!B) {
       +   '<div class="rc">';
     if (u.length) {
       h += u.map(function(x) {
-        const t = x.title ? '<span class="tt">「' + x.title + '」</span>' : '';
+        const tc = x.title_color || '#7C3AED';
+        const t = x.title ? '<span class="tt" style="color:'+tc+';background:'+tc+'22">「' + x.title + '」</span>' : '';
         return '<div class="ri">'
              +   makeAvatar(x.nickname)
              +   '<div class="ri2">'
