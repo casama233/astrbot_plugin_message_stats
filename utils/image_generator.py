@@ -1226,7 +1226,7 @@ class ImageGenerator:
                     self._avatar_cache[user_id] = avatar_url
                     return True
             except Exception as e:
-                self.logger.debug(f"获取 TG 头像失败 (user_id={user_id}): {e}")
+                self.logger.warning(f"获取 TG 头像失败 (user_id={user_id}): {e}")
                 return None
         
         # 并发获取所有用户头像
@@ -1237,7 +1237,7 @@ class ImageGenerator:
         if success_count > 0:
             self.logger.info(f"TG 头像预获取完成: {success_count}/{len(users)} 成功")
         else:
-            self.logger.debug("TG 头像预获取：所有用户均未获取到头像，将使用彩色文字头像回退")
+            self.logger.warning("TG 头像预获取：所有用户均未获取到头像，将使用彩色文字头像回退")
     
     async def _prefetch_dc_avatars(self, users: List[UserData]):
         """预获取 Discord 用户头像
