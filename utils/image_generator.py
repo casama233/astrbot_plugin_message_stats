@@ -323,6 +323,9 @@ class ImageGenerator:
             # 只初始化Jinja2环境，浏览器按需启动
             await self._init_jinja2_env()
             
+            # 启动时清理上次异常退出残留的临时图片文件
+            await self._cleanup_stale_temp_files()
+            
             self.logger.info("图片生成器初始化完成（浏览器未启动，将在首次生成图片时按需启动）")
         except FileNotFoundError as e:
             self.logger.error(f"模板文件未找到: {e}")
@@ -334,6 +337,31 @@ class ImageGenerator:
             self.logger.error(f"初始化图片生成器失败: {e}")
             self.logger.error(f"详细错误: {traceback.format_exc()}")
             raise ImageGenerationError(f"初始化失败: {e}")
+    
+    async def _cleanup_stale_temp_files(self):
+        """清理上次异常退出残留的临时图片文件
+        
+        当插件被 kill -9、OOM 杀死、断电等异常情况时，
+        finally 块不会执行，tmp 文件会残留。
+        每次初始化时扫描临时目录，清理残留文件。
+        """
+        try:
+            import glob
+            temp_dir = tempfile.gettempdir()
+            patterns = ["rank_image_*.png", "milestone_*.png"]
+            cleaned = 0
+            for pattern in patterns:
+                search_path = os.path.join(temp_dir, pattern)
+                for file_path in glob.glob(search_path):
+                    try:
+                        os.unlink(file_path)
+                        cleaned += 1
+                    except OSError:
+                        pass
+            if cleaned > 0:
+                self.logger.info(f"启动清理：已删除 {cleaned} 个上次残留的临时图片文件")
+        except Exception as e:
+            self.logger.warning(f"清理残留临时文件时出现异常: {e}")
     
     async def _ensure_browser(self):
         """确保浏览器已启动（懒加载）并增加任务计数

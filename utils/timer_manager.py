@@ -815,14 +815,16 @@ class TimerManager:
             return False
         
         # 定时推送只发送图片，不发送文字消息
-        success = await self.push_service.push_to_group(group_id, "", image_path)
-        
-        # 清理临时图片文件
-        if image_path and await aiofiles.os.path.exists(image_path):
-            try:
-                await aiofiles.os.unlink(image_path)
-            except OSError as e:
-                self.logger.warning(f"清理临时图片文件失败: {image_path}, 错误: {e}")
+        try:
+            success = await self.push_service.push_to_group(group_id, "", image_path)
+        finally:
+            # 清理临时图片文件（确保无论push_to_group是否异常都执行）
+            if image_path:
+                try:
+                    if await aiofiles.os.path.exists(image_path):
+                        await aiofiles.os.unlink(image_path)
+                except Exception as e:
+                    self.logger.warning(f"清理临时图片文件失败: {image_path}, 错误: {e}")
         
         return success
     

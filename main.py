@@ -895,16 +895,18 @@ class MessageStatsPlugin(Star):
             message_chain = MessageChain()
             message_chain = message_chain.file_image(image_path)
             
-            await self.context.send_message(unified_msg_origin, message_chain)
-            self.logger.info(f"✅ 里程碑推送成功: {nickname} 发言 {current_count} 次")
-            
-            # 清理临时图片
-            import aiofiles
-            if await aiofiles.os.path.exists(image_path):
-                try:
-                    await aiofiles.os.unlink(image_path)
-                except OSError as e:
-                    self.logger.warning(f"清理里程碑图片失败: {e}")
+            try:
+                await self.context.send_message(unified_msg_origin, message_chain)
+                self.logger.info(f"✅ 里程碑推送成功: {nickname} 发言 {current_count} 次")
+            finally:
+                # 清理临时图片（确保无论send_message是否异常都执行）
+                import aiofiles
+                if image_path:
+                    try:
+                        if await aiofiles.os.path.exists(image_path):
+                            await aiofiles.os.unlink(image_path)
+                    except Exception as e:
+                        self.logger.warning(f"清理里程碑图片失败: {e}")
                     
         except Exception as e:
             self.logger.error(f"里程碑推送失败: {e}", exc_info=True)
@@ -1005,14 +1007,16 @@ class MessageStatsPlugin(Star):
                 return
             
             # 使用框架标准的 image_result 返回图片
-            yield event.image_result(image_path)
-            
-            # 清理临时图片文件
-            if await aiofiles.os.path.exists(image_path):
-                try:
-                    await aiofiles.os.unlink(image_path)
-                except OSError as e:
-                    self.logger.warning(f"清理里程碑临时图片失败: {image_path}, 错误: {e}")
+            try:
+                yield event.image_result(image_path)
+            finally:
+                # 清理临时图片文件（确保无论yield后续是否执行都清理）
+                if image_path:
+                    try:
+                        if await aiofiles.os.path.exists(image_path):
+                            await aiofiles.os.unlink(image_path)
+                    except Exception as e:
+                        self.logger.warning(f"清理里程碑临时图片失败: {image_path}, 错误: {e}")
                     
         except Exception as e:
             self.logger.error(f"里程碑获取失败: {e}", exc_info=True)
@@ -1780,35 +1784,11 @@ class MessageStatsPlugin(Star):
         # 时间段过滤：优化版本，使用预聚合策略减少双重循环
         # 策略：如果时间段较短（日榜），直接计算；如果时间段较长（周榜/月榜），使用缓存
         
-        # 对于日榜，直接计算（因为时间段短，性能影响小）
-        if rank_type == RankType.DAILY:
-            return self._calculate_daily_rank(group_data, start_date, end_date)
-        
-        # 对于周榜和月榜，使用优化策略（现在是异步方法）
-        elif rank_type in [RankType.WEEKLY, RankType.MONTHLY, RankType.YEARLY, RankType.LAST_YEAR]:
+        # 所有时间段类型统一走批量优化路径
+        if rank_type in [RankType.DAILY, RankType.WEEKLY, RankType.MONTHLY, RankType.YEARLY, RankType.LAST_YEAR]:
             return await self._calculate_period_rank_optimized(group_data, start_date, end_date)
         
         return []
-    
-    @exception_handler(ExceptionConfig(log_exception=True, reraise=True))
-    def _calculate_daily_rank(self, group_data: List[UserData], start_date, end_date) -> List[tuple]:
-        """计算日榜（直接计算策略）"""
-        filtered_users = []
-        for user in group_data:
-            # 过滤屏蔽用户
-            if self._is_blocked_user(user.user_id):
-                continue
-            
-            # 检查是否有发言记录（兼容新旧两种存储格式）
-            if not user._message_dates and not user.history:
-                continue
-            
-            # 计算指定时间段的发言次数
-            period_count = user.get_message_count_in_period(start_date, end_date)
-            if period_count > 0:
-                filtered_users.append((user, period_count))
-        
-        return filtered_users
     
     async def _calculate_period_rank_optimized(self, group_data: List[UserData], start_date, end_date) -> List[tuple]:
         """计算周榜/月榜（优化策略）"""
