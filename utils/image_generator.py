@@ -1101,34 +1101,64 @@ class ImageGenerator:
         encoded = quote(svg)
         return f"data:image/svg+xml,{encoded}"
 
+    @staticmethod
+    def _detect_platform(group_id: str) -> str:
+        """根据群ID特征识别平台
+        
+        - TG: 以 - 或 -100 开头的负数
+        - Discord: 18-19 位纯数字
+        - 飞书: 以 oc_ 开头
+        - QQ: 5-10 位纯数字
+        - 其他: 未知
+        """
+        gid = str(group_id).strip()
+        
+        # 飞书：oc_ 前缀
+        if gid.startswith('oc_'):
+            return 'feishu'
+        
+        # Telegram：以 - 或 -100 开头的负数
+        if gid.startswith('-'):
+            return 'telegram'
+        
+        # 到这里都是正数
+        if gid.isdigit():
+            length = len(gid)
+            # QQ：5-10 位短数字
+            if 5 <= length <= 10:
+                return 'qq'
+            # Discord：18-19 位 Snowflake
+            if 18 <= length <= 19:
+                return 'discord'
+        
+        return 'unknown'
+
     def _get_avatar_url(self, user_id: str, nickname: str = "", group_info=None) -> str:
         """获取用户头像URL
         
-        根据群ID正负数判断平台：
-        - 正数群ID（QQ等）→ 使用 qlogo.cn 获取真实头像
-        - 负数群ID（Telegram等）→ unified_msg_origin不可靠，回退彩色首字母 SVG data URI
+        根据群ID特征精确识别平台：
+        - QQ（5-10位正数）→ qlogo.cn 真实头像
+        - Telegram（负数/-100开头）→ 彩色文字头像
+        - Discord（18-19位正数）→ 彩色文字头像
+        - 飞书（oc_开头）→ 彩色文字头像
         
         Args:
             user_id: 用户ID
-            nickname: 用户昵称（用于回退头像的首字母）
+            nickname: 用户昵称
             group_info: 群组信息
         
         Returns:
             str: 头像URL
         """
         user_id_str = str(user_id)
+        group_id_str = str(group_info.group_id) if group_info else ""
+        platform = self._detect_platform(group_id_str)
         
-        # 从 group_id 判断平台
-        group_id_str = ""
-        if group_info:
-            group_id_str = str(group_info.group_id)
-        
-        # 正数群ID → QQ平台（或其他正数ID平台），尝试用 qlogo 获取头像
-        # 负数群ID → Telegram 等平台，直接回退彩色文字头像
-        if group_id_str.lstrip('-').isdigit() and not group_id_str.startswith('-'):
+        # 仅QQ使用 qlogo 真实头像
+        if platform == 'qq':
             return f"https://q1.qlogo.cn/g?b=qq&nk={user_id_str}&s=640"
         
-        # 其他平台：回退彩色首字母文字头像
+        # 其他平台一律回退彩色文字头像
         return self._generate_avatar_svg_data_uri(nickname, user_id_str)
     
     @safe_file_operation(default_return="")

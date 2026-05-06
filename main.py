@@ -58,7 +58,8 @@ from .utils.constants import (
     GROUP_MEMBERS_CACHE_TTL as CACHE_TTL_SECONDS
 )
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.0")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.1")
+
 class MessageStatsPlugin(Star):
     """群发言统计插件
     
