@@ -1461,20 +1461,40 @@ class MessageStatsPlugin(Star):
                         
                         grp_name = group_info.group_name or f"群{group_id}"
                         
-                        # 只分析排行榜上实际显示的用户（与 config.rand 绑定）
-                        # 未上榜的用户生成的头衔不会显示，分析纯属浪费 Token
+                        # 只分析排行榜上实际显示的用户中还没有持久化头衔的用户
+                        # 已有持久化头衔的用户跳过LLM分析，保持头衔不变，避免每次都不一样
                         ranked_users_for_llm = [user for user, _ in filtered_data[:config.rand]]
-                        titles, token_usage = await llm_analyzer.analyze_users(
-                            ranked_users_for_llm, grp_name, min_daily_messages=min_daily
-                        )
+                        users_need_llm = [u for u in ranked_users_for_llm if not u.llm_title]
+                        users_with_title = [u for u in ranked_users_for_llm if u.llm_title]
+                        
+                        if users_with_title:
+                            self.logger.info(f"跳过 {len(users_with_title)} 个已有持久化头衔的用户，保留现有头衔")
+                        
+                        titles = None
+                        token_usage = None
+                        if users_need_llm:
+                            self.logger.info(f"为 {len(users_need_llm)} 个无头衔用户调用LLM生成头衔")
+                            titles, token_usage = await llm_analyzer.analyze_users(
+                                users_need_llm, grp_name, min_daily_messages=min_daily
+                            )
                         
                         if token_usage and token_usage.get("total_tokens", 0) > 0:
                             token_usage_info = token_usage
                         
+                        # 构建完整的titles_map：已有头衔 + 新生成的头衔
+                        titles_map = {}
+                        
+                        # 1. 先加载已有持久化头衔
+                        for user_data_item, _ in filtered_data:
+                            if user_data_item.llm_title:
+                                titles_map[user_data_item.user_id] = {
+                                    "title": user_data_item.llm_title,
+                                    "color": user_data_item.llm_title_color or "#7C3AED"
+                                }
+                        
+                        # 2. 再合并新生成的头衔（覆盖旧头衔，因为LLM可能对之前无头衔的用户生成了新头衔）
                         if titles:
-                            self.logger.info(f"✅ 手动LLM头衔生成成功: 为 {len(titles)} 个用户生成了头衔")
-                            # 保存头衔映射，同时持久化到数据文件
-                            titles_map = titles
+                            self.logger.info(f"✅ LLM头衔生成成功: 为 {len(titles)} 个新用户生成了头衔")
                             for user_data_item, _ in filtered_data:
                                 if user_data_item.user_id in titles:
                                     info = titles[user_data_item.user_id]
@@ -1490,11 +1510,17 @@ class MessageStatsPlugin(Star):
                                     # 写入持久化字段
                                     user_data_item.llm_title = title_text
                                     user_data_item.llm_title_color = title_color if isinstance(info, dict) else None
+                                    titles_map[user_data_item.user_id] = {
+                                        "title": user_data_item.llm_title,
+                                        "color": user_data_item.llm_title_color or "#7C3AED"
+                                    }
                             # 保存群组数据到文件，确保头衔持久化
                             group_data_for_save = await self.data_manager.get_group_data(group_id)
                             if group_data_for_save:
                                 await self.data_manager.save_group_data(group_id, group_data_for_save)
                                 self.logger.info("头衔数据已持久化保存到文件")
+                        else:
+                            self.logger.info(f"所有用户已有持久化头衔，无需LLM分析，使用已有头衔")
 
 
                 except Exception as e:

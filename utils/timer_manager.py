@@ -677,9 +677,35 @@ class TimerManager:
                 if token_usage and token_usage.get("total_tokens", 0) > 0:
                     token_usage_info = token_usage
                 
+                # 筛选出还没有持久化头衔的用户，已有头衔的用户跳过LLM分析
+                users_need_llm = [u for u in group_data if u.message_count > 0 and not u.llm_title]
+                users_with_title = [u for u in group_data if u.llm_title]
+                
+                if users_with_title:
+                    self.logger.info(f"跳过 {len(users_with_title)} 个已有持久化头衔的用户，保留现有头衔")
+                
+                titles = None
+                token_usage = None
+                if users_need_llm:
+                    self.logger.info(f"为 {len(users_need_llm)} 个无头衔用户调用LLM生成头衔")
+                    titles, token_usage = await llm_analyzer.analyze_users(
+                        users_need_llm, grp_name, min_daily_messages=min_daily
+                    )
+                
+                if token_usage and token_usage.get("total_tokens", 0) > 0:
+                    token_usage_info = token_usage
+                
+                # 构建titles_map：已有头衔 + 新生成的头衔
+                titles_map = {}
+                for user in group_data:
+                    if user.llm_title:
+                        titles_map[user.user_id] = {
+                            "title": user.llm_title,
+                            "color": user.llm_title_color or "#7C3AED"
+                        }
+                
                 if titles:
-                    self.logger.info(f"✅ LLM 头衔生成成功: 为 {len(titles)} 个用户生成了头衔")
-                    titles_map = titles
+                    self.logger.info(f"✅ LLM头衔生成成功: 为 {len(titles)} 个新用户生成了头衔")
                     for user in group_data:
                         if user.user_id in titles:
                             info = titles[user.user_id]
@@ -696,13 +722,15 @@ class TimerManager:
                                 user.display_title_color = None
                                 user.llm_title = title_text
                                 user.llm_title_color = None
+                            titles_map[user.user_id] = {
+                                "title": user.llm_title,
+                                "color": user.llm_title_color or "#7C3AED"
+                            }
                     # 持久化头衔到文件
                     await self.data_manager.save_group_data(group_id, group_data)
                     self.logger.info("定时推送头衔数据已持久化保存到文件")
-
-
                 else:
-                    self.logger.warning("⚠️ LLM 头衔生成结果为空，将使用不带头衔的排行榜")
+                    self.logger.info(f"所有用户已有持久化头衔，无需LLM分析，使用已有头衔")
             except Exception as e:
                 self.logger.error(f"❌ LLM 头衔生成异常: {e}", exc_info=True)
                 self.logger.info("将使用不带头衔的排行榜继续推送")
