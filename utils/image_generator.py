@@ -1101,44 +1101,34 @@ class ImageGenerator:
         encoded = quote(svg)
         return f"data:image/svg+xml,{encoded}"
 
-    @staticmethod
-    def _detect_platform_from_origin(origin: str) -> str:
-        """从 unified_msg_origin 中提取平台名
-        
-        unified_msg_origin 格式: "平台名:消息类型:群ID"（至少第一个冒号前是平台名）
-        """
-        if origin and ':' in origin:
-            return origin.split(':', 1)[0].strip().lower()
-        return ""
-
-    def _get_avatar_url(self, user_id: str, nickname: str = "", group_info: 'GroupInfo' = None) -> str:
+    def _get_avatar_url(self, user_id: str, nickname: str = "", group_info=None) -> str:
         """获取用户头像URL
         
-        根据群组的 unified_msg_origin 判断平台：
-        - qq → 使用 qlogo.cn 获取真实头像
-        - 其他（telegram/discord/lark/Amydd等）→ 回退彩色首字母 SVG data URI
+        根据群ID正负数判断平台：
+        - 正数群ID（QQ等）→ 使用 qlogo.cn 获取真实头像
+        - 负数群ID（Telegram等）→ unified_msg_origin不可靠，回退彩色首字母 SVG data URI
         
         Args:
             user_id: 用户ID
             nickname: 用户昵称（用于回退头像的首字母）
-            group_info: 群组信息（包含 unified_msg_origin 用于判断平台）
+            group_info: 群组信息
         
         Returns:
             str: 头像URL
         """
         user_id_str = str(user_id)
         
-        # 从 unified_msg_origin 提取平台名
+        # 从 group_id 判断平台
+        group_id_str = ""
         if group_info:
-            platform = self._detect_platform_from_origin(group_info.unified_msg_origin)
-        else:
-            platform = ""
+            group_id_str = str(group_info.group_id)
         
-        # QQ平台：使用 qlogo 获取真实头像
-        if platform == 'qq':
+        # 正数群ID → QQ平台（或其他正数ID平台），尝试用 qlogo 获取头像
+        # 负数群ID → Telegram 等平台，直接回退彩色文字头像
+        if group_id_str.lstrip('-').isdigit() and not group_id_str.startswith('-'):
             return f"https://q1.qlogo.cn/g?b=qq&nk={user_id_str}&s=640"
         
-        # 其他平台（telegram/discord/lark等）：回退彩色首字母文字头像
+        # 其他平台：回退彩色首字母文字头像
         return self._generate_avatar_svg_data_uri(nickname, user_id_str)
     
     @safe_file_operation(default_return="")
