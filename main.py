@@ -1473,16 +1473,29 @@ class MessageStatsPlugin(Star):
                         
                         if titles:
                             self.logger.info(f"✅ 手动LLM头衔生成成功: 为 {len(titles)} 个用户生成了头衔")
-                            # 保存头衔映射，同时设置到 user.display_title
+                            # 保存头衔映射，同时持久化到数据文件
                             titles_map = titles
                             for user_data_item, _ in filtered_data:
                                 if user_data_item.user_id in titles:
                                     info = titles[user_data_item.user_id]
                                     if isinstance(info, dict):
-                                        user_data_item.display_title = info.get("title")
-                                        user_data_item.display_title_color = info.get("color")
+                                        title_text = info.get("title")
+                                        title_color = info.get("color")
+                                        user_data_item.display_title = title_text
+                                        user_data_item.display_title_color = title_color
                                     else:
-                                        user_data_item.display_title = info
+                                        title_text = info
+                                        user_data_item.display_title = title_text
+                                        user_data_item.display_title_color = None
+                                    # 写入持久化字段
+                                    user_data_item.llm_title = title_text
+                                    user_data_item.llm_title_color = title_color if isinstance(info, dict) else None
+                            # 保存群组数据到文件，确保头衔持久化
+                            group_data_for_save = await self.data_manager.get_group_data(group_id)
+                            if group_data_for_save:
+                                await self.data_manager.save_group_data(group_id, group_data_for_save)
+                                self.logger.info("头衔数据已持久化保存到文件")
+
 
                 except Exception as e:
                     self.logger.error(f"❌ 手动LLM头衔生成异常: {e}", exc_info=True)
@@ -1539,8 +1552,17 @@ class MessageStatsPlugin(Star):
         if not group_data:
             return None
         
+        # 加载持久化的头衔到运行时字段
+        # 确保即使不触发LLM分析，排行榜也能显示已有的头衔
+        for user in group_data:
+            if user.llm_title:
+                user.display_title = user.llm_title
+                if user.llm_title_color:
+                    user.display_title_color = user.llm_title_color
+        
         # 显示排行榜前强制刷新昵称缓存，确保昵称准确性
         await self._refresh_nickname_cache_for_ranking(event, group_id, group_data)
+
         
         # 根据类型筛选数据并获取排序值
         filtered_data_with_values = await self._filter_data_by_rank_type(group_data, rank_type)

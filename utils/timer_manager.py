@@ -638,8 +638,17 @@ class TimerManager:
             self.logger.warning(f"群组 {group_id} 没有数据")
             return False
         
+        # 加载持久化的头衔到运行时字段
+        # 确保即使本次不触发LLM分析，排行榜也能显示已有的头衔
+        for user in group_data:
+            if user.llm_title:
+                user.display_title = user.llm_title
+                if user.llm_title_color:
+                    user.display_title_color = user.llm_title_color
+        
         # 定时推送前强制刷新昵称缓存，确保显示最新昵称
         await self._refresh_nickname_cache_for_timer_push(group_id, group_data)
+
         
         # 如果启用了 LLM 头衔分析，先调用 LLM 生成头衔
         token_usage_info = None
@@ -675,10 +684,22 @@ class TimerManager:
                         if user.user_id in titles:
                             info = titles[user.user_id]
                             if isinstance(info, dict):
-                                user.display_title = info.get("title")
-                                user.display_title_color = info.get("color")
+                                title_text = info.get("title")
+                                title_color = info.get("color")
+                                user.display_title = title_text
+                                user.display_title_color = title_color
+                                user.llm_title = title_text
+                                user.llm_title_color = title_color
                             else:
-                                user.display_title = info
+                                title_text = info
+                                user.display_title = title_text
+                                user.display_title_color = None
+                                user.llm_title = title_text
+                                user.llm_title_color = None
+                    # 持久化头衔到文件
+                    await self.data_manager.save_group_data(group_id, group_data)
+                    self.logger.info("定时推送头衔数据已持久化保存到文件")
+
 
                 else:
                     self.logger.warning("⚠️ LLM 头衔生成结果为空，将使用不带头衔的排行榜")
