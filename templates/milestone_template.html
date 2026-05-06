@@ -187,11 +187,7 @@
             <div class="content-layer">
                 <div class="medal-box">
                     <div class="medal-solid">
-                        {% if avatar_url %}
                         <img class="ava-img" src="{{ avatar_url }}" alt="avatar" />
-                        {% else %}
-                        <div style="width:110px;height:110px;border-radius:50%;background:{{ avatar_color or '#3B82F6' }};display:flex;align-items:center;justify-content:center;color:#fff;font-size:48px;font-weight:700;text-shadow:0 2px 4px rgba(0,0,0,0.3);">{{ avatar_char or '?' }}</div>
-                        {% endif %}
                     </div>
                     <div class="nick-txt">{{ nickname }}</div>
                 </div>

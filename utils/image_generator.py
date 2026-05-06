@@ -569,16 +569,12 @@ class ImageGenerator:
                 return None
             
             # 准备模板数据
-            avatar_url = self._get_avatar_url(user_id)
-            avatar_color = self._get_avatar_color(nickname)
-            avatar_char = self._get_avatar_char(nickname)
+            avatar_url = self._get_avatar_url(user_id, "qq")
             group_name = group_info.group_name or f"群{group_info.group_id}"
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             template_data = {
                 'avatar_url': avatar_url,
-                'avatar_color': avatar_color,
-                'avatar_char': avatar_char,
                 'nickname': self._escape_html_safe(nickname),
                 'user_id': self._escape_html_safe(str(user_id)),
                 'group_name': self._escape_html_safe(f"{group_name}[{group_info.group_id}]"),
@@ -755,9 +751,7 @@ class ImageGenerator:
                 'nickname': user.nickname,
                 'title': user_title,
                 'title_color': user_title_color,
-                'avatar_url': self._get_avatar_url(user.user_id),
-                'avatar_color': self._get_avatar_color(user.nickname),
-                'avatar_char': self._get_avatar_char(user.nickname),
+                'avatar_url': self._get_avatar_url(user.user_id, "qq"),
                 'total': user_messages,
                 'percentage': (user_messages / total_messages * 100) if total_messages > 0 else 0,
                 'last_date': user.last_date or "未知",
@@ -774,7 +768,7 @@ class ImageGenerator:
                 user_items.append({
                     'rank': current_rank,
                     'nickname': current_user_data.nickname,
-                    'avatar_url': self._get_avatar_url(current_user_data.user_id),
+                    'avatar_url': self._get_avatar_url(current_user_data.user_id, "qq"),
                     'total': current_user_messages,
                     'percentage': (current_user_messages / total_messages * 100) if total_messages > 0 else 0,
                     'last_date': current_user_data.last_date or "未知",
@@ -984,10 +978,6 @@ class ImageGenerator:
         safe_rank_color = html.escape(styles['rank_color'])
         safe_avatar_border = html.escape(styles['avatar_border'])
         
-        # 获取字母头像所需元素
-        safe_avatar_color = html.escape(item_data.get('avatar_color', '#3B82F6'))
-        safe_avatar_char = html.escape(item_data.get('avatar_char', '?'))
-        
         # 使用字符串拼接而不是f-string，提高安全性
         # 根据当前用户状态选择合适的排名样式类
         rank_class = "rank-current" if item_data['is_current_user'] else "rank"
@@ -1001,16 +991,10 @@ class ImageGenerator:
             safe_title_color = html.escape(str(user_title_color_raw)) if user_title_color_raw else '#7C3AED'
             user_title_html = f'<div class="user-title" style="color:{safe_title_color};background:{safe_title_color}22;font-size:13px;font-weight:700;padding:0px 8px;border-radius:10px;display:inline-block;margin-left:8px;vertical-align:middle;line-height:24px;">「{safe_title}」</div>'
         
-        # 头像区域：有URL用<img>，否则显示首字母彩色圆形
-        if safe_avatar_url:
-            avatar_html = f'    <img class="avatar" src="{safe_avatar_url}" style="border-color: {safe_avatar_border};" />'
-        else:
-            avatar_html = f'    <div class="avatar" style="background:{safe_avatar_color};width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px;font-weight:700;margin-right:20px;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,0.1);text-shadow:0 1px 3px rgba(0,0,0,0.3);border:3px solid {safe_avatar_border};">{safe_avatar_char}</div>'
-        
         html_parts = [
             f'<div class="{css_classes["item"]}" style="{safe_separator_style}">',
             f'    <div class="{rank_class}">#{item_data["rank"]}</div>',
-            avatar_html,
+            f'    <img class="avatar" src="{safe_avatar_url}" style="border-color: {safe_avatar_border};" />',
             '    <div class="info">',
             '        <div class="name-date">',
             f'            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><span class="nickname" style="font-size:24px;font-weight:600;color:#1F2937;line-height:1.3;">{safe_nickname}</span>{user_title_html}</div>',
@@ -1052,7 +1036,7 @@ class ImageGenerator:
         
         # 如果头像URL无效，使用默认头像
         if not safe_avatar_url:
-            safe_avatar_url = ""
+            safe_avatar_url = self._get_avatar_url(str(item_data.get('user_id', '0')), "qq")
         
         content = {
             'nickname': safe_nickname,
@@ -1084,23 +1068,35 @@ class ImageGenerator:
         url = url.replace('<', '').replace('>', '').replace('"', '').replace("'", '')
         return url
 
-    def _get_avatar_url(self, user_id: str, platform: str = "") -> str:
+    def _get_avatar_url(self, user_id: str, platform: str = "qq") -> str:
         """获取用户头像URL
-        注意：本插件为通用插件，不绑定特定平台。
-        返回空字符串时，HTML模板会自动显示彩色首字母头像作为优雅回退。
         
         Args:
             user_id (str): 用户ID
-            platform (str): 平台类型（保留参数）
+            platform (str): 平台类型，支持 'qq', 'telegram', 'discord' 等
             
         Returns:
-            str: 始终返回空字符串，使用模板内置的字母头像回退机制
+            str: 头像URL
         """
-        # 不再使用 qlogo.cn 等第三方头像服务
-        # 因为不同平台的用户ID格式不同（QQ的数字ID、Telegram的负数ID等）
-        # 使用第三方服务会导致头像错乱（显示其他人的头像）
-        # 模板中已有完善的回退机制：avatar_url 为空时显示彩色首字母圆形头像
-        return ""
+        # 支持多种平台的头像服务
+        avatar_services = {
+            "qq": "https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640",
+            "telegram": "https://telegram.org/img/t_logo.png",  # Telegram默认头像
+            "discord": "https://cdn.discordapp.com/embed/avatars/{avatar_id}.png",  # Discord默认头像
+            "default": "https://via.placeholder.com/640x640?text=Avatar"  # 通用默认头像
+        }
+        
+        service_url = avatar_services.get(platform, avatar_services["default"])
+        
+        # 安全计算 avatar_id：处理负数ID（Telegram）和非数字字符串ID
+        try:
+            uid_int = abs(int(user_id))  # 取绝对值，确保为正数
+            avatar_id = uid_int % 5
+        except (ValueError, TypeError):
+            # 如果 user_id 不是有效数字，使用默认值
+            avatar_id = 0
+        
+        return service_url.format(user_id=user_id, avatar_id=avatar_id)
     
     @safe_file_operation(default_return="")
     async def _load_html_template(self) -> str:
