@@ -569,7 +569,7 @@ class ImageGenerator:
                 return None
             
             # 准备模板数据
-            avatar_url = self._get_avatar_url(user_id, nickname)
+            avatar_url = self._get_avatar_url(user_id, nickname, group_info.group_id)
             group_name = group_info.group_name or f"群{group_info.group_id}"
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
@@ -671,7 +671,7 @@ class ImageGenerator:
             return await self._generate_empty_html(group_info, title)
         
         # 使用批量处理优化性能（显式传入头衔映射）
-        processed_data = self._process_user_data_batch(users, current_user_id, titles_map)
+        processed_data = self._process_user_data_batch(users, current_user_id, titles_map, group_info)
         
         # 计算统计数据
         total_messages = processed_data['total_messages']
@@ -701,7 +701,7 @@ class ImageGenerator:
         return await self._render_html_template(html_template, template_data, processed_data['user_items'])
     
     def _process_user_data_batch(self, users: List[UserData], current_user_id: Optional[str], 
-                                  titles_map: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+                                  titles_map: Optional[Dict[str, str]] = None, group_info=None) -> Dict[str, Any]:
         """批量处理用户数据，优化性能
         
         Args:
@@ -709,9 +709,11 @@ class ImageGenerator:
             current_user_id: 当前用户ID，用于高亮显示
             titles_map: 用户ID到头衔的映射字典 {user_id: title}
                       优先使用此参数中的头衔，若无则回退到 user.display_title
+            group_info: 群组信息，用于判断平台获取头像
         """
         if not users:
             return {'total_messages': 0, 'user_items': []}
+        group_id = str(group_info.group_id) if group_info else ""
         
         # 预计算统计数据 - 使用时间段内的发言数
         total_messages = sum(user.display_total if user.display_total is not None else user.message_count for user in users)
@@ -751,12 +753,13 @@ class ImageGenerator:
                 'nickname': user.nickname,
                 'title': user_title,
                 'title_color': user_title_color,
-                'avatar_url': self._get_avatar_url(user.user_id, user.nickname),
+                'avatar_url': self._get_avatar_url(user.user_id, user.nickname, group_id),
                 'total': user_messages,
                 'percentage': (user_messages / total_messages * 100) if total_messages > 0 else 0,
                 'last_date': user.last_date or "未知",
                 'is_current_user': is_current_user,
-                'is_separator': False
+                'is_separator': False,
+                'group_id': group_id
             })
         
         # 如果当前用户不在排行榜中，添加到末尾
@@ -768,12 +771,13 @@ class ImageGenerator:
                 user_items.append({
                     'rank': current_rank,
                     'nickname': current_user_data.nickname,
-                    'avatar_url': self._get_avatar_url(current_user_data.user_id, current_user_data.nickname),
+                    'avatar_url': self._get_avatar_url(current_user_data.user_id, current_user_data.nickname, group_id),
                     'total': current_user_messages,
                     'percentage': (current_user_messages / total_messages * 100) if total_messages > 0 else 0,
                     'last_date': current_user_data.last_date or "未知",
                     'is_current_user': True,
-                    'is_separator': True
+                    'is_separator': True,
+                    'group_id': group_id
                 })
         
         return {
@@ -1034,9 +1038,13 @@ class ImageGenerator:
         title = item_data.get('title', None)
         safe_title = self._escape_html_safe(str(title)) if title else None
         
-        # 如果头像URL无效，使用默认头像
+        # 如果头像URL无效，使用回退彩色文字头像
         if not safe_avatar_url:
-            safe_avatar_url = self._get_avatar_url(str(item_data.get('user_id', '0')), str(item_data.get('nickname', '')))
+            safe_avatar_url = self._get_avatar_url(
+                str(item_data.get('user_id', '0')),
+                str(item_data.get('nickname', '')),
+                str(item_data.get('group_id', ''))
+            )
         
         content = {
             'nickname': safe_nickname,
@@ -1056,12 +1064,13 @@ class ImageGenerator:
         return html.escape(text, quote=True)
     
     def _validate_url_safe(self, url: str) -> str:
-        """验证并清理URL"""
+        """验证并清理URL（支持 http/https 和 data URI）"""
         if not isinstance(url, str):
             url = str(url)
         
-        # 基本URL验证
-        if not url or not url.startswith(('http://', 'https://')):
+        if not url:
+            return ""
+        if not url.startswith(('http://', 'https://', 'data:')):
             return ""
         
         # 移除潜在的恶意字符
@@ -1092,9 +1101,37 @@ class ImageGenerator:
         encoded = quote(svg)
         return f"data:image/svg+xml,{encoded}"
 
-    def _get_avatar_url(self, user_id: str, nickname: str = "") -> str:
-        """生成彩色首字母 SVG data URI 头像（跨平台，不依赖任何头像服务）"""
-        return self._generate_avatar_svg_data_uri(nickname, user_id)
+    def _get_avatar_url(self, user_id: str, nickname: str = "", group_id: str = "") -> str:
+        """获取用户头像URL
+        
+        优先尝试获取真实头像，获取不到时回退为彩色首字母 SVG data URI。
+        根据 group_id 特征判断平台：
+        - 正数或含 'qq' 等 → QQ 平台，使用 qlogo
+        - 负数或含 'telegram' 等 → Telegram 等其他平台，直接回退彩色文字头像
+        
+        Args:
+            user_id: 用户ID
+            nickname: 用户昵称（用于回退头像的首字母）
+            group_id: 群组ID（用于判断平台）
+        
+        Returns:
+            str: 头像URL
+        """
+        # 根据群组ID特征判断平台
+        group_id_str = str(group_id)
+        user_id_str = str(user_id)
+        
+        # 正数群ID → QQ平台，使用QQ头像服务
+        # 负数群ID（Telegram等）或其他平台 → 跳过外部头像服务，直接回退彩色文字头像
+        if group_id_str.lstrip('-').isdigit() and not group_id_str.startswith('-'):
+            # QQ平台：使用 qlogo 获取真实头像
+            qq_url = f"https://q1.qlogo.cn/g?b=qq&nk={user_id_str}&s=640"
+            # 返回 QQ 头像 URL
+            # 注意：QQ头像如果不存在会返回默认头像，不需要单独 fallback
+            return qq_url
+        
+        # 其他平台（Telegram、Discord等）：直接回退彩色首字母文字头像
+        return self._generate_avatar_svg_data_uri(nickname, user_id_str)
     
     @safe_file_operation(default_return="")
     async def _load_html_template(self) -> str:

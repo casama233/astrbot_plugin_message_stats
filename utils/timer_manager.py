@@ -151,10 +151,18 @@ class TimerManager:
         >>> timer_manager = TimerManager(data_manager, image_generator, context)
         >>> await timer_manager.start_timer(config)
         >>> status = await timer_manager.get_status()
+        
+    Note:
+        文件锁机制：每次创建新实例时生成递增的 generation ID 并写入文件。
+        旧实例每秒检查一次，发现自己不是最新时自动退出。
+        锁文件只有1个，永远被最新实例覆写。
+        调用 stop_timer() 时如果本实例是最新的，会清理 lock 文件。
     """
     
-    # 文件锁机制：使用磁盘文件记录最新的 generation ID
-    # 即使重装插件或重启，也能防止旧实例重复推送
+    # 文件锁机制：使用磁盘文件记录当前最新的 generation ID
+    # 每个新实例写入自��的 generation，旧实例循环中检查发现自己不再是
+    # 最新的 generation 时自动退出，防止重装后旧实例继续发送
+    # 锁文件永不累积（始终只有1个文件，被最新实例不断覆写）
     _lock_file_base: Optional[str] = None
     _generation_id: int = 0
     
@@ -209,14 +217,18 @@ class TimerManager:
             self.logger.info("定时任务管理器初始化成功（受限模式）")
         
     def _get_lock_file_path(self) -> Optional[Path]:
-        """获取文件锁路径"""
+        """获取文件锁路径（始终只有1个文件，被覆写，不会累积垃圾）"""
         base = TimerManager._lock_file_base
         if not base:
             return None
         return Path(base) / ".timer_generation.lock"
 
     def _write_lock_file(self):
-        """写入文件锁，标记当前 generation"""
+        """写入文件锁，覆写为当前 generation
+        
+        锁文件始终只有1个，永远被当前的 generation 覆写，
+        不会产生垃圾文件。
+        """
         lock_path = self._get_lock_file_path()
         if not lock_path:
             return
@@ -227,7 +239,12 @@ class TimerManager:
             self.logger.warning(f"写入定时任务文件锁失败: {e}")
 
     def _is_latest_generation(self) -> bool:
-        """检查当前 generation 是否最新（读取文件锁）"""
+        """检查当前 generation 是否最新（读取文件锁）
+        
+        文件锁中存的是最新的 generation ID。
+        如果和本实例不一致（有更新实例写入更大 generation），
+        说明本实例已过期，应自动退出。
+        """
         lock_path = self._get_lock_file_path()
         if not lock_path:
             return True
@@ -236,7 +253,7 @@ class TimerManager:
                 return True
             content = lock_path.read_text(encoding='utf-8').strip()
             latest = int(content)
-            return self._generation == latest
+            return self._generation >= latest
         except (ValueError, OSError, IOError):
             return True
 
@@ -350,6 +367,8 @@ class TimerManager:
     async def stop_timer(self) -> bool:
         """停止定时任务
         
+        如果当前实例是最新的 generation，会清理 lock 文件。
+        
         Returns:
             bool: 停止是否成功
         """
@@ -368,6 +387,16 @@ class TimerManager:
         self.status = TimerTaskStatus.STOPPED
         self.next_push_time = None
         self._stop_event.clear()
+        
+        # 如果是当前最新 generation，清理锁文件
+        try:
+            if self._is_latest_generation():
+                lock_path = self._get_lock_file_path()
+                if lock_path and lock_path.exists():
+                    lock_path.unlink()
+                    self.logger.debug("已清理定时任务文件锁")
+        except Exception as e:
+            self.logger.debug(f"清理文件锁忽略: {e}")
         
         self.logger.info("定时任务已停止")
         return True
