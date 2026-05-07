@@ -613,7 +613,19 @@ class TimerManager:
                 return cached_name
         
         try:
-            # 2. 从数据文件获取群组名称
+            # 2. 从群名持久化缓存获取
+            group_names_file = self.data_manager.data_dir / "group_names.json"
+            if await aiofiles.os.path.exists(group_names_file):
+                async with aiofiles.open(group_names_file, 'r', encoding='utf-8') as f:
+                    content = await f.read()
+                    if content.strip():
+                        group_names = json.loads(content)
+                        if isinstance(group_names, dict) and group_names.get(group_id_str):
+                            group_name = str(group_names[group_id_str]).strip()
+                            self._group_name_cache[group_id_str] = group_name
+                            return group_name
+
+            # 3. 从数据文件获取群组名称
             group_file_path = self.data_manager.groups_dir / f"{group_id}.json"
             
             if await aiofiles.os.path.exists(group_file_path):
@@ -645,7 +657,7 @@ class TimerManager:
                                     self._group_name_cache[group_id_str] = group_name
                                     return group_name
             
-            # 3. 返回默认格式
+            # 4. 返回默认格式
             return f"群{group_id}"
             
         except (OSError, IOError, ValueError, TypeError, KeyError, json.JSONDecodeError) as e:
@@ -677,8 +689,8 @@ class TimerManager:
                 if user.llm_title_color:
                     user.display_title_color = user.llm_title_color
         
-        # 定时推送前强制刷新昵称缓存，确保显示最新昵称
-        await self._refresh_nickname_cache_for_timer_push(group_id, group_data)
+        # 定时/手动推送前补齐缺失昵称，避免图片里显示空昵称
+        await self._ensure_nicknames_for_push(group_id, group_data)
 
         
         # 如果启用了 LLM 头衔分析，先调用 LLM 生成头衔
@@ -1111,31 +1123,19 @@ class TimerManager:
         else:
             return "发言榜单"
     
-    async def _refresh_nickname_cache_for_timer_push(self, group_id: str, group_data):
-        """定时推送前尝试刷新昵称缓存
-        
-        注意: 定时推送时无法直接访问 bot API（因为 Context 对象没有 bot 属性），
-        因此这里只能使用已存储的数据。如果需要最新昵称，用户需要在群中发言以触发更新。
-        """
-        try:
-            if not self.context:
-                self.logger.debug("定时推送时缺少context，跳过昵称刷新")
-                return
-            
-            # 定时推送时，Context 对象不包含 bot 属性
-            # 无法直接调用 get_group_member_list API
-            # 昵称会在用户发送消息时通过事件处理自动更新
-            # 这里只记录日志，不进行实际刷新
-            self.logger.debug(f"定时推送使用缓存的昵称数据，群组 {group_id} 共 {len(group_data)} 个用户")
-            
-            # 如果需要获取群成员信息，需要通过平台适配器
-            # 但定时推送场景下通常没有可用的平台连接
-            # 因此跳过昵称刷新，使用已存储的昵称
-            
-        except (AttributeError, TypeError, ValueError) as e:
-            # 这是预期的情况，因为 Context 没有 bot 属性
-            self.logger.debug(f"定时推送跳过昵称刷新: {e}")
-    
+    async def _ensure_nicknames_for_push(self, group_id: str, group_data):
+        """定时/手动推送前补齐缺失昵称"""
+        changed = False
+        for user in group_data:
+            nickname = str(user.nickname).strip() if user.nickname is not None else ""
+            if nickname:
+                continue
+            user.nickname = f"用户{user.user_id}"
+            changed = True
+        if changed:
+            await self.data_manager.save_group_data(group_id, group_data)
+            self.logger.info(f"群组 {group_id} 推送前已补齐缺失昵称")
+
     def _generate_text_message(self, users_with_values: List[tuple], group_info: GroupInfo, title: str, config) -> str:
         """生成文字消息
         

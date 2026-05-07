@@ -561,6 +561,7 @@ class MessageStatsPlugin(Star):
         try:
             from .utils.timer_manager import TimerManager
             self.timer_manager = TimerManager(self.data_manager, self.image_generator, self.context, self.group_unified_msg_origins)
+            self.timer_manager.update_group_name_cache_batch(self._web_group_name_cache)
             self.logger.info("定时任务管理器初始化成功")
             # 注意：定时任务的启动在 _setup_caches 中统一进行，避免重复启动
                     
@@ -713,6 +714,7 @@ class MessageStatsPlugin(Star):
         await self._collect_group_unified_msg_origin(event)
         
         # 获取用户昵称并记录统计
+        await self._cache_group_name(event, group_id)
         nickname = await self._get_user_display_name(event, group_id, user_id)
         await self._record_message_stats(group_id, user_id, nickname)
     
