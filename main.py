@@ -63,7 +63,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.2")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.3")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -1095,6 +1095,7 @@ class MessageStatsPlugin(Star):
     
     # ========== 设置命令 ==========
     
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("设置发言榜数量")
     async def set_rank_count(self, event: AstrMessageEvent):
         """设置排行榜显示人数"""
@@ -1135,6 +1136,7 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"设置排行榜数量失败: {e}", exc_info=True)
             yield event.plain_result("设置失败,请稍后重试")
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("设置发言榜图片")
     async def set_image_mode(self, event: AstrMessageEvent):
         """设置排行榜的显示模式（图片或文字）
@@ -1184,6 +1186,7 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"设置图片模式失败: {e}", exc_info=True)
             yield event.plain_result("设置失败,请稍后重试")
     
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("清除发言榜单")
     async def clear_message_ranking(self, event: AstrMessageEvent):
         """清除发言榜单"""
@@ -1205,6 +1208,7 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"清除榜单失败: {e}")
             yield event.plain_result("清除榜单失败,请稍后重试！")
     
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("刷新发言榜群成员缓存")
     async def refresh_group_members_cache(self, event: AstrMessageEvent):
         """刷新群成员列表缓存"""
@@ -1906,6 +1910,7 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"获取定时状态失败: {e}")
             yield event.plain_result("获取定时状态失败，请稍后重试！")
     
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("手动推送发言榜")
     async def manual_push(self, event: AstrMessageEvent):
         """手动推送排行榜"""
@@ -1940,6 +1945,7 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"处理手动推送请求失败: {e}")
             yield event.plain_result("处理请求失败，请稍后重试！")
     
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("设置发言榜定时时间")
     async def set_timer_time(self, event: AstrMessageEvent):
         """设置定时推送时间
@@ -2007,6 +2013,7 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"处理设置定时时间请求失败: {e}")
             yield event.plain_result("处理请求失败，请稍后重试！")
     
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("设置发言榜定时群组")
     async def set_timer_groups(self, event: AstrMessageEvent):
         """设置定时推送目标群组"""
@@ -2042,6 +2049,7 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"处理设置定时群组请求失败: {e}")
             yield event.plain_result("处理请求失败，请稍后重试！")
     
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("删除发言榜定时群组")
     async def remove_timer_groups(self, event: AstrMessageEvent):
         """删除定时推送目标群组"""
@@ -2100,6 +2108,7 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"处理删除定时群组请求失败: {e}")
             yield event.plain_result("处理请求失败，请稍后重试！")
     
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("启用发言榜定时")
     async def enable_timer(self, event: AstrMessageEvent):
         """启用定时推送功能"""
@@ -2134,6 +2143,7 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"处理启用定时请求失败: {e}")
             yield event.plain_result("处理请求失败，请稍后重试！")
     
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("禁用发言榜定时")
     async def disable_timer(self, event: AstrMessageEvent):
         """禁用定时推送功能"""
@@ -2154,6 +2164,7 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"处理禁用定时请求失败: {e}")
             yield event.plain_result("处理请求失败，请稍后重试！")
     
+    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("设置发言榜定时类型")
     async def set_timer_type(self, event: AstrMessageEvent):
         """设置定时推送的排行榜类型"""
