@@ -14,8 +14,18 @@ import traceback
 import hashlib
 import json
 import uuid
+import html
+from urllib.parse import quote
 
 from astrbot.api import logger as astrbot_logger
+
+# 异步 HTTP 请求（用于获取 TG/Discord 头像）
+try:
+    import aiohttp
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    aiohttp = None
+    AIOHTTP_AVAILABLE = False
 
 # 从集中管理的常量模块导入图片生成配置
 from .constants import (
@@ -29,7 +39,6 @@ from .constants import (
 # Jinja2模板引擎
 try:
     from jinja2 import Template, Environment, select_autoescape, FileSystemLoader
-    import html  # 用于HTML转义安全防护
     JINJA2_AVAILABLE = True
 except ImportError:
     JINJA2_AVAILABLE = False
@@ -129,6 +138,9 @@ class ImageGenerator:
         
         # Jinja2环境将在initialize方法中初始化
         self.jinja_env = None
+        
+        # 头像缓存字典 {user_id: avatar_url}，每次生成图片时预获取，用完即弃
+        self._avatar_cache: Dict[str, str] = {}
     
     def _update_template_path(self):
         """根据主题配置更新模板路径（支持自动根据时间切换主题）"""
@@ -311,6 +323,9 @@ class ImageGenerator:
             # 只初始化Jinja2环境，浏览器按需启动
             await self._init_jinja2_env()
             
+            # 启动时清理上次异常退出残留的临时图片文件
+            await self._cleanup_stale_temp_files()
+            
             self.logger.info("图片生成器初始化完成（浏览器未启动，将在首次生成图片时按需启动）")
         except FileNotFoundError as e:
             self.logger.error(f"模板文件未找到: {e}")
@@ -322,6 +337,31 @@ class ImageGenerator:
             self.logger.error(f"初始化图片生成器失败: {e}")
             self.logger.error(f"详细错误: {traceback.format_exc()}")
             raise ImageGenerationError(f"初始化失败: {e}")
+    
+    async def _cleanup_stale_temp_files(self):
+        """清理上次异常退出残留的临时图片文件
+        
+        当插件被 kill -9、OOM 杀死、断电等异常情况时，
+        finally 块不会执行，tmp 文件会残留。
+        每次初始化时扫描临时目录，清理残留文件。
+        """
+        try:
+            import glob
+            temp_dir = tempfile.gettempdir()
+            patterns = ["rank_image_*.png", "milestone_*.png"]
+            cleaned = 0
+            for pattern in patterns:
+                search_path = os.path.join(temp_dir, pattern)
+                for file_path in glob.glob(search_path):
+                    try:
+                        os.unlink(file_path)
+                        cleaned += 1
+                    except OSError:
+                        pass
+            if cleaned > 0:
+                self.logger.info(f"启动清理：已删除 {cleaned} 个上次残留的临时图片文件")
+        except Exception as e:
+            self.logger.warning(f"清理残留临时文件时出现异常: {e}")
     
     async def _ensure_browser(self):
         """确保浏览器已启动（懒加载）并增加任务计数
@@ -569,7 +609,7 @@ class ImageGenerator:
                 return None
             
             # 准备模板数据
-            avatar_url = self._get_avatar_url(user_id, "qq")
+            avatar_url = self._get_avatar_url(user_id, nickname, group_info)
             group_name = group_info.group_name or f"群{group_info.group_id}"
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
@@ -670,8 +710,12 @@ class ImageGenerator:
         if not users:
             return await self._generate_empty_html(group_info, title)
         
+        # 预获取非QQ平台用户的真实头像（TG/Discord），填充到 _avatar_cache
+        await self._prefetch_avatars(users, group_info)
+        
         # 使用批量处理优化性能（显式传入头衔映射）
-        processed_data = self._process_user_data_batch(users, current_user_id, titles_map)
+        self._current_group_info = group_info
+        processed_data = self._process_user_data_batch(users, current_user_id, titles_map, group_info)
         
         # 计算统计数据
         total_messages = processed_data['total_messages']
@@ -701,7 +745,7 @@ class ImageGenerator:
         return await self._render_html_template(html_template, template_data, processed_data['user_items'])
     
     def _process_user_data_batch(self, users: List[UserData], current_user_id: Optional[str], 
-                                  titles_map: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+                                  titles_map: Optional[Dict[str, str]] = None, group_info=None) -> Dict[str, Any]:
         """批量处理用户数据，优化性能
         
         Args:
@@ -709,6 +753,7 @@ class ImageGenerator:
             current_user_id: 当前用户ID，用于高亮显示
             titles_map: 用户ID到头衔的映射字典 {user_id: title}
                       优先使用此参数中的头衔，若无则回退到 user.display_title
+            group_info: 群组信息，用于判断平台获取头像
         """
         if not users:
             return {'total_messages': 0, 'user_items': []}
@@ -751,12 +796,13 @@ class ImageGenerator:
                 'nickname': user.nickname,
                 'title': user_title,
                 'title_color': user_title_color,
-                'avatar_url': self._get_avatar_url(user.user_id, "qq"),
+                'avatar_url': self._get_avatar_url(user.user_id, user.nickname, self._current_group_info),
                 'total': user_messages,
                 'percentage': (user_messages / total_messages * 100) if total_messages > 0 else 0,
                 'last_date': user.last_date or "未知",
                 'is_current_user': is_current_user,
-                'is_separator': False
+                'is_separator': False,
+                '_group_info': group_info
             })
         
         # 如果当前用户不在排行榜中，添加到末尾
@@ -768,12 +814,13 @@ class ImageGenerator:
                 user_items.append({
                     'rank': current_rank,
                     'nickname': current_user_data.nickname,
-                    'avatar_url': self._get_avatar_url(current_user_data.user_id, "qq"),
+                    'avatar_url': self._get_avatar_url(current_user_data.user_id, current_user_data.nickname, self._current_group_info),
                     'total': current_user_messages,
                     'percentage': (current_user_messages / total_messages * 100) if total_messages > 0 else 0,
                     'last_date': current_user_data.last_date or "未知",
                     'is_current_user': True,
-                    'is_separator': True
+                    'is_separator': True,
+                    '_group_info': group_info
                 })
         
         return {
@@ -942,34 +989,13 @@ class ImageGenerator:
 </html>"""
     
     def _generate_user_item_html_safe(self, item_data: Dict[str, Any]) -> str:
-        """生成安全的用户条目HTML（使用Jinja2模板）"""
+        """生成安全的用户条目HTML"""
         # 使用元组和字典预构建减少字符串操作
         css_classes = self._get_css_classes(item_data)
         styles = self._get_item_styles(item_data)
         safe_content = self._get_safe_content(item_data)
         
-        # 准备模板数据
-        template_data = {
-            'rank': item_data['rank'],
-            'total': item_data['total'],
-            'percentage': item_data['percentage'],
-            'css_classes': css_classes,
-            'styles': styles,
-            'safe_content': safe_content
-        }
-        
-        # 使用Jinja2模板渲染，确保所有动态内容都经过转义
-        if JINJA2_AVAILABLE:
-            try:
-                if not hasattr(self, '_user_item_macro_template'):
-                    self._user_item_macro_template = self._load_user_item_macro_template()
-                
-                if self._user_item_macro_template:
-                    return self._user_item_macro_template.render(item_data=template_data)
-            except Exception as e:
-                self.logger.warning(f"Jinja2模板渲染失败，使用备用方案: {e}")
-        
-        # 备用方案：使用更安全的字符串拼接方式
+        # 使用更安全的字符串拼接方式
         # 对所有动态内容进行HTML转义
         safe_nickname = html.escape(safe_content['nickname'])
         safe_avatar_url = html.escape(safe_content['avatar_url'])
@@ -978,7 +1004,6 @@ class ImageGenerator:
         safe_rank_color = html.escape(styles['rank_color'])
         safe_avatar_border = html.escape(styles['avatar_border'])
         
-        # 使用字符串拼接而不是f-string，提高安全性
         # 根据当前用户状态选择合适的排名样式类
         rank_class = "rank-current" if item_data['is_current_user'] else "rank"
         
@@ -1024,28 +1049,37 @@ class ImageGenerator:
         }
     
     def _get_safe_content(self, item_data: Dict[str, Any]) -> Dict[str, str]:
-        """获取安全的内容（优化版本）"""
-        # 批量转义提高性能
-        safe_nickname = self._escape_html_safe(str(item_data.get('nickname', '未知用户')))
-        safe_last_date = self._escape_html_safe(str(item_data.get('last_date', '未知')))
-        safe_avatar_url = self._validate_url_safe(str(item_data.get('avatar_url', '')))
+        """获取安全的内容（优化版本）
         
-        # 处理头衔转义
+        注意：不在此处进行 HTML 转义，转义推迟到最终渲染阶段：
+        - Jinja2 路径：模板引擎的 autoescape 自动处理
+        - Fallback 路径：_generate_user_item_html_safe 中手动转义
+        避免重复转义导致 &amp; 等乱码。
+        """
+        # 不做HTML转义，仅提取原始值（转义由接收方负责）
+        nickname = str(item_data.get('nickname', '未知用户'))
+        last_date = str(item_data.get('last_date', '未知'))
+        avatar_url = self._validate_url_safe(str(item_data.get('avatar_url', '')))
+        
+        # 处理头衔
         title = item_data.get('title', None)
-        safe_title = self._escape_html_safe(str(title)) if title else None
         
-        # 如果头像URL无效，使用默认头像
-        if not safe_avatar_url:
-            safe_avatar_url = self._get_avatar_url(str(item_data.get('user_id', '0')), "qq")
+        # 如果头像URL无效，使用回退彩色文字头像
+        if not avatar_url:
+            avatar_url = self._get_avatar_url(
+                str(item_data.get('user_id', '0')),
+                str(item_data.get('nickname', '')),
+                item_data.get('_group_info', None)
+            )
         
         content = {
-            'nickname': safe_nickname,
-            'last_date': safe_last_date,
-            'avatar_url': safe_avatar_url
+            'nickname': nickname,
+            'last_date': last_date,
+            'avatar_url': avatar_url
         }
         
-        if safe_title:
-            content['title'] = safe_title
+        if title:
+            content['title'] = title
             
         return content
 
@@ -1056,47 +1090,263 @@ class ImageGenerator:
         return html.escape(text, quote=True)
     
     def _validate_url_safe(self, url: str) -> str:
-        """验证并清理URL"""
+        """验证并清理URL（支持 http/https 和 data URI）"""
         if not isinstance(url, str):
             url = str(url)
         
-        # 基本URL验证
-        if not url or not url.startswith(('http://', 'https://')):
+        if not url:
+            return ""
+        if not url.startswith(('http://', 'https://', 'data:')):
             return ""
         
         # 移除潜在的恶意字符
         url = url.replace('<', '').replace('>', '').replace('"', '').replace("'", '')
         return url
 
-    def _get_avatar_url(self, user_id: str, platform: str = "qq") -> str:
-        """获取用户头像URL
+    _AVATAR_COLORS = ['#F59E0B','#3B82F6','#8B5CF6','#EC4899','#10B981',
+                      '#EF4444','#14B8A6','#F97316','#6366F1','#84CC16',
+                      '#06B6D4','#D946EF','#0EA5E9','#EAB308','#A855F7']
+
+    @staticmethod
+    def _get_avatar_color(seed: str) -> str:
+        h = 0
+        for ch in seed:
+            h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+        colors = ImageGenerator._AVATAR_COLORS
+        return colors[h % len(colors)]
+
+    @staticmethod
+    def _generate_avatar_svg_data_uri(nickname: str, seed: str) -> str:
+        letter = '?'
+        if nickname and nickname.strip():
+            letter = nickname.strip()[0]
+        color = ImageGenerator._get_avatar_color(seed or 'x')
+        svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640"><circle cx="320" cy="320" r="320" fill="{color}"/><text x="320" y="320" text-anchor="middle" dominant-baseline="central" font-size="280" font-weight="700" font-family="Microsoft YaHei,sans-serif" fill="white">{html.escape(letter)}</text></svg>'
+        encoded = quote(svg)
+        return f"data:image/svg+xml,{encoded}"
+
+    # ========== 跨平台头像获取（TG / Discord / 飞书 / QQ） ==========
+
+    @staticmethod
+    def _detect_platform(group_id: str) -> str:
+        """根据群ID特征识别平台
+        
+        - TG: 以 - 或 -100 开头的负数
+        - Discord: 18-19 位纯数字
+        - 飞书: 以 oc_ 开头
+        - QQ: 5-10 位纯数字
+        - 其他: 未知
+        """
+        gid = str(group_id).strip()
+        
+        # 飞书：oc_ 前缀
+        if gid.startswith('oc_'):
+            return 'feishu'
+        
+        # Telegram：以 - 或 -100 开头的负数
+        if gid.startswith('-'):
+            return 'telegram'
+        
+        # 到这里都是正数
+        if gid.isdigit():
+            length = len(gid)
+            # QQ：5-10 位短数字
+            if 5 <= length <= 10:
+                return 'qq'
+            # Discord：18-19 位 Snowflake
+            if 18 <= length <= 19:
+                return 'discord'
+        
+        return 'unknown'
+
+    async def _prefetch_avatars(self, users: List[UserData], group_info: GroupInfo):
+        """预获取本批用户的头像URL，填充到 _avatar_cache
+        
+        在生成HTML之前调用，异步并发获取TG/Discord/飞书的真实头像。
+        获取失败或未配置Token的用户会自动回退到彩色文字头像。
         
         Args:
-            user_id (str): 用户ID
-            platform (str): 平台类型，支持 'qq', 'telegram', 'discord' 等
-            
+            users: 用户数据列表
+            group_info: 群组信息
+        """
+        self._avatar_cache.clear()
+        group_id_str = str(group_info.group_id) if group_info else ""
+        platform = self._detect_platform(group_id_str)
+        
+        # QQ 不需要预获取，直接通过 qlogo.cn 拼接
+        if platform == 'qq':
+            return
+        
+        # 飞书：保留之前逻辑（回退彩色文字头像）
+        if platform == 'feishu':
+            return
+        
+        if platform == 'telegram':
+            await self._prefetch_tg_avatars(users)
+        elif platform == 'discord':
+            await self._prefetch_dc_avatars(users)
+    
+    async def _prefetch_tg_avatars(self, users: List[UserData]):
+        """预获取 Telegram 用户头像
+        
+        使用 TG Bot API 获取用户最新的头像文件路径，拼接为可下载的 URL。
+        API 调用链路：getUserProfilePhotos -> getFile -> 拼接下载链接
+        """
+        tg_token = getattr(self.config, 'tg_bot_token', '')
+        if not tg_token or not AIOHTTP_AVAILABLE:
+            self.logger.debug("TG Bot Token 未配置或 aiohttp 不可用，跳过 TG 头像预获取")
+            return
+        
+        self.logger.info(f"开始预获取 {len(users)} 个 TG 用户头像...")
+        success_count = 0
+        
+        async def fetch_single(user_id: str):
+            """获取单个用户的头像 URL"""
+            try:
+                # 步骤1: 获取用户头像列表
+                photos_url = f"https://api.telegram.org/bot{tg_token}/getUserProfilePhotos"
+                params = {"user_id": int(float(user_id)), "limit": 1}
+                
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                    async with session.get(photos_url, params=params) as resp:
+                        if resp.status != 200:
+                            return
+                        data = await resp.json()
+                    
+                    if not data.get("ok") or not data.get("result", {}).get("photos"):
+                        return
+                    
+                    # 取最新的头像（数组第一个），取最大分辨率的 file_id（数组最后一个）
+                    latest_photos = data["result"]["photos"][0]
+                    file_id = latest_photos[-1]["file_id"]
+                    
+                    # 步骤2: 获取文件路径
+                    get_file_url = f"https://api.telegram.org/bot{tg_token}/getFile"
+                    async with session.get(get_file_url, params={"file_id": file_id}) as resp2:
+                        if resp2.status != 200:
+                            return
+                        file_data = await resp2.json()
+                    
+                    if not file_data.get("ok") or not file_data.get("result", {}).get("file_path"):
+                        return
+                    
+                    file_path = file_data["result"]["file_path"]
+                    
+                    # 步骤3: 拼接最终下载链接
+                    avatar_url = f"https://api.telegram.org/file/bot{tg_token}/{file_path}"
+                    self._avatar_cache[user_id] = avatar_url
+                    return True
+            except Exception as e:
+                self.logger.warning(f"获取 TG 头像失败 (user_id={user_id}): {e}")
+                return None
+        
+        # 并发获取所有用户头像
+        tasks = [fetch_single(u.user_id) for u in users if u.user_id]
+        results = await asyncio.gather(*tasks)
+        success_count = sum(1 for r in results if r)
+        
+        if success_count > 0:
+            self.logger.info(f"TG 头像预获取完成: {success_count}/{len(users)} 成功")
+        else:
+            self.logger.warning("TG 头像预获取：所有用户均未获取到头像，将使用彩色文字头像回退")
+    
+    async def _prefetch_dc_avatars(self, users: List[UserData]):
+        """预获取 Discord 用户头像
+        
+        通过 Discord API 获取用户信息，提取 avatar hash，拼接 CDN URL。
+        如果用户的 avatar hash 以 a_ 开头，使用 GIF 格式。
+        """
+        dc_token = getattr(self.config, 'dc_bot_token', '')
+        if not dc_token or not AIOHTTP_AVAILABLE:
+            self.logger.debug("Discord Bot Token 未配置或 aiohttp 不可用，跳过 DC 头像预获取")
+            return
+        
+        self.logger.info(f"开始预获取 {len(users)} 个 Discord 用户头像...")
+        success_count = 0
+        
+        # Discord 需要 Bot 认证头
+        headers = {
+            "Authorization": f"Bot {dc_token}",
+            "User-Agent": "DiscordBot (astrbot_plugin_message_stats, 1.0)"
+        }
+        
+        async def fetch_single(user_id: str):
+            """获取单个 Discord 用户的头像 URL"""
+            try:
+                user_url = f"https://discord.com/api/v10/users/{int(float(user_id))}"
+                
+                async with aiohttp.ClientSession(
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as session:
+                    async with session.get(user_url) as resp:
+                        if resp.status != 200:
+                            return
+                        user_data = await resp.json()
+                    
+                    avatar_hash = user_data.get("avatar")
+                    if not avatar_hash:
+                        # 用户没有设置头像，使用默认头像算法
+                        # Discord 默认头像：user_id 右移 22 位后对 6（默认头像数量）取模
+                        try:
+                            uid_int = int(float(user_id))
+                            default_index = (uid_int >> 22) % 6
+                            avatar_url = f"https://cdn.discordapp.com/embed/avatars/{default_index}.png"
+                            self._avatar_cache[user_id] = avatar_url
+                            return True
+                        except (ValueError, OverflowError):
+                            return
+                    
+                    # 有自定义头像：判断是否为 GIF（a_ 开头）
+                    ext = "gif" if avatar_hash.startswith("a_") else "png"
+                    avatar_url = f"https://cdn.discordapp.com/avatars/{int(float(user_id))}/{avatar_hash}.{ext}"
+                    self._avatar_cache[user_id] = avatar_url
+                    return True
+            except Exception as e:
+                self.logger.debug(f"获取 DC 头像失败 (user_id={user_id}): {e}")
+                return None
+        
+        # 并发获取所有用户头像
+        tasks = [fetch_single(u.user_id) for u in users if u.user_id]
+        results = await asyncio.gather(*tasks)
+        success_count = sum(1 for r in results if r)
+        
+        if success_count > 0:
+            self.logger.info(f"DC 头像预获取完成: {success_count}/{len(users)} 成功")
+        else:
+            self.logger.debug("DC 头像预获取：所有用户均未获取到头像，将使用彩色文字头像回退")
+
+    def _get_avatar_url(self, user_id: str, nickname: str = "", group_info=None) -> str:
+        """获取用户头像URL
+        
+        优先级：
+        1. 预获取缓存（_avatar_cache，由 _prefetch_avatars 填充的 TG/Discord/飞书真实头像）
+        2. QQ 平台：qlogo.cn 真实头像
+        3. 回退：彩色文字 SVG 头像
+        
+        Args:
+            user_id: 用户ID
+            nickname: 用户昵称
+            group_info: 群组信息
+        
         Returns:
             str: 头像URL
         """
-        # 支持多种平台的头像服务
-        avatar_services = {
-            "qq": "https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640",
-            "telegram": "https://telegram.org/img/t_logo.png",  # Telegram默认头像
-            "discord": "https://cdn.discordapp.com/embed/avatars/{avatar_id}.png",  # Discord默认头像
-            "default": "https://via.placeholder.com/640x640?text=Avatar"  # 通用默认头像
-        }
+        user_id_str = str(user_id)
+        group_id_str = str(group_info.group_id) if group_info else ""
+        platform = self._detect_platform(group_id_str)
         
-        service_url = avatar_services.get(platform, avatar_services["default"])
+        # 优先级1: 预获取缓存（TG/Discord 的真实头像）
+        cached_url = self._avatar_cache.get(user_id_str)
+        if cached_url:
+            return cached_url
         
-        # 安全计算 avatar_id：处理负数ID（Telegram）和非数字字符串ID
-        try:
-            uid_int = abs(int(user_id))  # 取绝对值，确保为正数
-            avatar_id = uid_int % 5
-        except (ValueError, TypeError):
-            # 如果 user_id 不是有效数字，使用默认值
-            avatar_id = 0
+        # 优先级2: QQ 平台使用 qlogo.cn 真实头像
+        if platform == 'qq':
+            return f"https://q1.qlogo.cn/g?b=qq&nk={user_id_str}&s=640"
         
-        return service_url.format(user_id=user_id, avatar_id=avatar_id)
+        # 优先级3: 回退彩色文字头像（飞书、未知平台、或预获取失败的 TG/Discord）
+        return self._generate_avatar_svg_data_uri(nickname, user_id_str)
     
     @safe_file_operation(default_return="")
     async def _load_html_template(self) -> str:

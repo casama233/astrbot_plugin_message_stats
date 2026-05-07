@@ -202,12 +202,17 @@ class UserData:
     # 按天聚合的字典 {date_str: count}，替代 history 列表存储
     # 10万条消息最多365个键值对，内存占用从O(n)降到O(365)
     _message_dates: Dict[str, int] = field(default_factory=dict)
-    # LLM 生成的头衔文本（运行时属性，不会持久化到文件）
+    # LLM 生成的头衔文本（持久化到文件，重启后依然保留）
+    llm_title: Optional[str] = None
+    # LLM 生成的头衔颜色（持久化到文件），如 "#EF4444"
+    llm_title_color: Optional[str] = None
+    # display_title / display_title_color 为运行时属性，从 llm_title / llm_title_color 映射而来
+    # 兼容旧代码逻辑，用于图片生成等场景
     display_title: Optional[str] = None
-    # LLM 生成的头衔颜色（运行时属性），如 "#EF4444"
     display_title_color: Optional[str] = None
     # 时间段内的发言数（运行时属性，仅用于图片生成，不会持久化到文件）
     display_total: Optional[int] = None
+
 
 
     
@@ -294,11 +299,12 @@ class UserData:
         
         将UserData实例转换为字典格式，便于JSON序列化。
         使用按天聚合的字典存储，大幅减少JSON文件体积。
+        包含持久化的头衔字段（llm_title, llm_title_color）。
         
         Returns:
             Dict[str, Any]: 包含用户数据的字典
         """
-        return {
+        result = {
             "user_id": self.user_id,
             "nickname": self.nickname,
             "message_count": self.message_count,
@@ -307,6 +313,13 @@ class UserData:
             "first_message_time": self.first_message_time,
             "last_message_time": self.last_message_time
         }
+        # 持久化头衔字段
+        if self.llm_title:
+            result["llm_title"] = self.llm_title
+        if self.llm_title_color:
+            result["llm_title_color"] = self.llm_title_color
+        return result
+
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'UserData':
@@ -356,7 +369,14 @@ class UserData:
             except TypeError as e:
                 logger.warning(f"history字段类型错误: {type(data.get('history'))}, 错误: {e}")
         
+        # 恢复持久化的头衔字段
+        if "llm_title" in data:
+            user_data.llm_title = data["llm_title"]
+        if "llm_title_color" in data:
+            user_data.llm_title_color = data["llm_title_color"]
+        
         return user_data
+
     
     def __lt__(self, other) -> bool:
         """按总消息数排序"""
@@ -421,10 +441,17 @@ class PluginConfig:
         # LLM 头衔分析配置
         self.llm_enabled = False
         self.llm_provider_id = ""
+        # 提示词默认空，由 LLMAnalyzer 的 DEFAULT_SYSTEM_PROMPT 兜底
         self.llm_system_prompt = ""
         self.llm_max_retries = 2
         self.llm_min_daily_messages = 0
         self.llm_enable_on_manual = False
+        # Telegram Bot Token（用于获取TG用户头像）
+        self.tg_bot_token = ""
+        
+        # Discord Bot Token（用于获取Discord用户头像）
+        self.dc_bot_token = ""
+        
         # 提示词版本号，版本升级时自动覆写
         self.llm_prompt_version = ""
     
@@ -473,7 +500,9 @@ class PluginConfig:
             "llm_max_retries": self.llm_max_retries,
             "llm_min_daily_messages": self.llm_min_daily_messages,
             "llm_enable_on_manual": self.llm_enable_on_manual,
-            "llm_prompt_version": self.llm_prompt_version
+            "llm_prompt_version": self.llm_prompt_version,
+            "tg_bot_token": self.tg_bot_token,
+            "dc_bot_token": self.dc_bot_token
         }
     
     @classmethod
@@ -551,6 +580,10 @@ class PluginConfig:
         config.llm_enable_on_manual = data.get("llm_enable_on_manual", False)
         config.llm_prompt_version = data.get("llm_prompt_version", "")
         
+        # Token 配置（不持久化到磁盘，从 AstrBot 配置读取，已在初始化时通过 config 传入）
+        config.tg_bot_token = data.get("tg_bot_token", "")
+        config.dc_bot_token = data.get("dc_bot_token", "")
+        
         return config
 
 
@@ -565,6 +598,8 @@ class GroupInfo:
         group_id (str): 群组唯一标识符
         group_name (str): 群组名称，默认为空字符串
         member_count (int): 群组成员数量，默认为0
+        unified_msg_origin (str): 消息来源标识，格式 "平台名:消息类型:群ID"
+                                  用于识别平台（qq/telegram/discord/lark等）
         
     Methods:
         to_dict(): 转换为字典格式
@@ -577,6 +612,23 @@ class GroupInfo:
     group_id: str
     group_name: str = ""
     member_count: int = 0
+    unified_msg_origin: str = ""
+    
+    def get_platform(self) -> str:
+        """从 unified_msg_origin 中提取平台名
+        
+        格式: "平台名:消息类型:群ID"
+        例如: "qq:GroupMessage:123456" -> "qq"
+              "Amydd:GroupMessage:-100123" -> "Amydd" (Telegram)  
+              "discord:..." -> "discord"
+              "lark:..." -> "lark" (飞书)
+        
+        Returns:
+            str: 平台名，无法识别时返回 ""
+        """
+        if self.unified_msg_origin and ':' in self.unified_msg_origin:
+            return self.unified_msg_origin.split(':', 1)[0]
+        return ""
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典

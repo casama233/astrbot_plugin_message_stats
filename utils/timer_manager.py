@@ -151,14 +151,20 @@ class TimerManager:
         >>> timer_manager = TimerManager(data_manager, image_generator, context)
         >>> await timer_manager.start_timer(config)
         >>> status = await timer_manager.get_status()
+        
+    Note:
+        文件锁机制：每次创建新实例时生成递增的 generation ID 并写入文件。
+        旧实例每秒检查一次，发现自己不是最新时自动退出。
+        锁文件只有1个，永远被最新实例覆写。
+        调用 stop_timer() 时如果本实例是最新的，会清理 lock 文件。
     """
     
-    # 类级别的全局锁和标志，确保所有实例共享
-    _global_execution_lock: Optional[asyncio.Lock] = None
-    _global_is_executing: bool = False
-    _global_next_push_time: Optional[datetime] = None
-    _global_instance_id: int = 0  # 全局实例计数器，用于检测重复实例
-    _global_active_task_id: Optional[int] = None  # 当前活跃的定时任务实例ID
+    # 文件锁机制：使用磁盘文件记录当前最新的 generation ID
+    # 每个新实例写入自��的 generation，旧实例循环中检查发现自己不再是
+    # 最新的 generation 时自动退出，防止重装后旧实例继续发送
+    # 锁文件永不累积（始终只有1个文件，被最新实例不断覆写）
+    _lock_file_base: Optional[str] = None
+    _generation_id: int = 0
     
     
     def __init__(self, data_manager: DataManager, image_generator: ImageGenerator, context=None, group_unified_msg_origins: Dict[str, str] = None):
@@ -184,14 +190,17 @@ class TimerManager:
         self.logger = astrbot_logger
         self._stop_event = asyncio.Event()
         
-        # 初始化类级别的全局锁（只在第一个实例时创建）
-        if TimerManager._global_execution_lock is None:
-            TimerManager._global_execution_lock = asyncio.Lock()
+        # 设置文件锁基础路径
+        if TimerManager._lock_file_base is None:
+            TimerManager._lock_file_base = str(data_manager.data_dir)
         
-        # 分配唯一的实例ID
-        TimerManager._global_instance_id += 1
-        self._instance_id = TimerManager._global_instance_id
-        self.logger.info(f"定时任务管理器实例 #{self._instance_id} 已创建")
+        # 分配唯一的 generation ID（递增，最新的拥有执行权）
+        TimerManager._generation_id += 1
+        self._generation = TimerManager._generation_id
+        self.logger.info(f"定时任务管理器 Generation #{self._generation} 已创建")
+        
+        # 写入文件锁，标记当前为最新 generation
+        self._write_lock_file()
         
         # 实例级别的锁（用于非关键操作）
         self._execution_lock = asyncio.Lock()
@@ -207,6 +216,47 @@ class TimerManager:
         else:
             self.logger.info("定时任务管理器初始化成功（受限模式）")
         
+    def _get_lock_file_path(self) -> Optional[Path]:
+        """获取文件锁路径（始终只有1个文件，被覆写，不会累积垃圾）"""
+        base = TimerManager._lock_file_base
+        if not base:
+            return None
+        return Path(base) / ".timer_generation.lock"
+
+    def _write_lock_file(self):
+        """写入文件锁，覆写为当前 generation
+        
+        锁文件始终只有1个，永远被当前的 generation 覆写，
+        不会产生垃圾文件。
+        """
+        lock_path = self._get_lock_file_path()
+        if not lock_path:
+            return
+        try:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            lock_path.write_text(str(self._generation), encoding='utf-8')
+        except Exception as e:
+            self.logger.warning(f"写入定时任务文件锁失败: {e}")
+
+    def _is_latest_generation(self) -> bool:
+        """检查当前 generation 是否最新（读取文件锁）
+        
+        文件锁中存的是最新的 generation ID。
+        如果和本实例不一致（有更新实例写入更大 generation），
+        说明本实例已过期，应自动退出。
+        """
+        lock_path = self._get_lock_file_path()
+        if not lock_path:
+            return True
+        try:
+            if not lock_path.exists():
+                return True
+            content = lock_path.read_text(encoding='utf-8').strip()
+            latest = int(content)
+            return self._generation >= latest
+        except (ValueError, OSError, IOError):
+            return True
+
     @safe_timer_operation(default_return=False)
     async def start_timer(self, config) -> bool:
         """启动定时任务
@@ -317,6 +367,8 @@ class TimerManager:
     async def stop_timer(self) -> bool:
         """停止定时任务
         
+        如果当前实例是最新的 generation，会清理 lock 文件。
+        
         Returns:
             bool: 停止是否成功
         """
@@ -335,6 +387,16 @@ class TimerManager:
         self.status = TimerTaskStatus.STOPPED
         self.next_push_time = None
         self._stop_event.clear()
+        
+        # 如果是当前最新 generation，清理锁文件
+        try:
+            if self._is_latest_generation():
+                lock_path = self._get_lock_file_path()
+                if lock_path and lock_path.exists():
+                    lock_path.unlink()
+                    self.logger.debug("已清理定时任务文件锁")
+        except Exception as e:
+            self.logger.debug(f"清理文件锁忽略: {e}")
         
         self.logger.info("定时任务已停止")
         return True
@@ -377,20 +439,19 @@ class TimerManager:
         Args:
             config: 插件配置对象
         """
-        # 注册当前实例为活跃任务
-        TimerManager._global_active_task_id = self._instance_id
-        self.logger.info(f"定时任务循环 #{self._instance_id} 已启动")
+        # 更新文件锁，标记当前为最新 generation
+        self._write_lock_file()
+        self.logger.info(f"定时任务循环 Generation #{self._generation} 已启动")
         
         try:
             while not self._stop_event.is_set():
-                # 检查是否为当前活跃的实例，如果不是则自动退出
-                if TimerManager._global_active_task_id is not None and TimerManager._global_active_task_id != self._instance_id:
-                    self.logger.info(f"检测到更新的实例 #{TimerManager._global_active_task_id} 已启动，实例 #{self._instance_id} 自动退出")
+                # 检查文件锁：如果当前不是最新 generation，自动退出
+                if not self._is_latest_generation():
+                    self.logger.info(f"检测到更新的 Generation 已启动，当前 #{self._generation} 自动退出")
                     break
                 
                 if self.status == TimerTaskStatus.PAUSED:
-                    # 暂停状态，等待恢复
-                    await asyncio.sleep(60)  # 每分钟检查一次
+                    await asyncio.sleep(60)
                     continue
                 
                 if self.status != TimerTaskStatus.RUNNING:
@@ -399,77 +460,47 @@ class TimerManager:
                 # 检查是否到达推送时间
                 now = datetime.now()
                 if self.next_push_time and now >= self.next_push_time:
-                    # 使用全局执行标志快速检查（无锁）
-                    if TimerManager._global_is_executing:
-                        self.logger.debug("全局推送任务正在执行中，跳过本次触发")
-                        await asyncio.sleep(10)  # 短暂等待后再检查
-                        continue
+                    # 执行前再次确认
+                    if not self._is_latest_generation():
+                        self.logger.info(f"推送前检测到更新的 Generation，当前 #{self._generation} 退出")
+                        break
                     
-                    # 使用全局锁防止多实例重复推送
-                    async with TimerManager._global_execution_lock:
-                        # 双重检查：获取锁后再次确认是否需要执行
-                        if TimerManager._global_is_executing:
-                            self.logger.debug("全局推送任务正在执行中（锁内检查），跳过")
-                            continue
-                        
-                        # 检查全局时间（可能已被其他实例更新）
-                        if TimerManager._global_next_push_time and datetime.now() < TimerManager._global_next_push_time:
-                            self.logger.debug("全局推送时间已被更新，跳过本次执行")
-                            continue
-                        
-                        # 再次检查是否为活跃实例（防止在等待锁期间被新实例取代）
-                        if TimerManager._global_active_task_id is not None and TimerManager._global_active_task_id != self._instance_id:
-                            self.logger.info(f"锁内检查: 实例 #{self._instance_id} 已被取代，跳过执行")
-                            break
-                        
-                        # 立即更新全局和实例的下次推送时间
-                        next_time = self._calculate_next_push_time(config.timer_push_time)
-                        self.next_push_time = next_time
-                        TimerManager._global_next_push_time = next_time
-                        TimerManager._global_is_executing = True
+                    # 计算下次推送时间
+                    next_time = self._calculate_next_push_time(config.timer_push_time)
+                    self.next_push_time = next_time
                     
                     try:
-                        # 执行推送任务
-                        self.logger.info(f"实例 #{self._instance_id} 开始执行定时推送任务")
+                        self.logger.info(f"Generation #{self._generation} 开始执行定时推送任务")
                         success = await self._execute_push_task(config)
                         if success:
-                            self.logger.info(f"✅ 实例 #{self._instance_id} 定时推送任务执行成功")
+                            self.logger.info(f"✅ Generation #{self._generation} 定时推送任务执行成功")
                         else:
-                            self.logger.error(f"❌ 实例 #{self._instance_id} 定时推送任务执行失败")
-                        
+                            self.logger.error(f"❌ Generation #{self._generation} 定时推送任务执行失败")
                         self.logger.info(f"下次推送时间: {self.next_push_time}")
-                    finally:
-                        # 确保释放全局执行标志
-                        TimerManager._global_is_executing = False
+                    except Exception as e:
+                        self.logger.error(f"Generation #{self._generation} 定时推送异常: {e}")
                 
-                # 等待一段时间后再次检查
-                await asyncio.sleep(60)  # 每分钟检查一次
+                await asyncio.sleep(60)
                 
         except asyncio.CancelledError:
-            self.logger.info(f"实例 #{self._instance_id} 定时任务被取消")
-            TimerManager._global_is_executing = False
+            self.logger.info(f"Generation #{self._generation} 定时任务被取消")
+            pass
         except (OSError, IOError, RuntimeError, ValueError) as e:
-            self.logger.error(f"实例 #{self._instance_id} 定时任务循环异常: {e}")
+            self.logger.error(f"Generation #{self._generation} 定时任务循环异常: {e}")
             self.status = TimerTaskStatus.ERROR
-            TimerManager._global_is_executing = False
-            # 限制重试次数，防止无限递归导致内存泄漏
             retry_count = getattr(self, '_timer_retry_count', 0)
             if retry_count >= 3:
-                self.logger.critical(f"实例 #{self._instance_id} 定时任务已重试 {retry_count} 次仍失败，停止重试")
+                self.logger.critical(f"Generation #{self._generation} 定时任务已重试 {retry_count} 次仍失败，停止重试")
                 return
             self._timer_retry_count = retry_count + 1
-            self.logger.info(f"实例 #{self._instance_id} 将在5分钟后重试 (第{self._timer_retry_count}次)")
+            self.logger.info(f"Generation #{self._generation} 将在5分钟后重试 (第{self._timer_retry_count}次)")
             await asyncio.sleep(300)
             if not self._stop_event.is_set():
-                self.logger.info(f"实例 #{self._instance_id} 尝试重启定时任务")
+                self.logger.info(f"Generation #{self._generation} 尝试重启定时任务")
                 self.timer_task = asyncio.create_task(self._timer_loop(config))
         except Exception as e:
-            # 捕获所有其他异常，防止任务静默退出
-            self.logger.error(f"实例 #{self._instance_id} 定时任务未知异常: {type(e).__name__}: {e}")
+            self.logger.error(f"Generation #{self._generation} 定时任务未知异常: {type(e).__name__}: {e}")
             self.status = TimerTaskStatus.ERROR
-            TimerManager._global_is_executing = False
-            # 未知异常不重试，避免无限递归
-            self.logger.critical(f"实例 #{self._instance_id} 定时任务因未知异常停止，不再自动重试")
     
     @safe_timer_operation(default_return=False)
     async def _execute_push_task(self, config) -> bool:
@@ -638,8 +669,17 @@ class TimerManager:
             self.logger.warning(f"群组 {group_id} 没有数据")
             return False
         
+        # 加载持久化的头衔到运行时字段
+        # 确保即使本次不触发LLM分析，排行榜也能显示已有的头衔
+        for user in group_data:
+            if user.llm_title:
+                user.display_title = user.llm_title
+                if user.llm_title_color:
+                    user.display_title_color = user.llm_title_color
+        
         # 定时推送前强制刷新昵称缓存，确保显示最新昵称
         await self._refresh_nickname_cache_for_timer_push(group_id, group_data)
+
         
         # 如果启用了 LLM 头衔分析，先调用 LLM 生成头衔
         token_usage_info = None
@@ -668,20 +708,60 @@ class TimerManager:
                 if token_usage and token_usage.get("total_tokens", 0) > 0:
                     token_usage_info = token_usage
                 
+                # 筛选出还没有持久化头衔的用户，已有头衔的用户跳过LLM分析
+                users_need_llm = [u for u in group_data if u.message_count > 0 and not u.llm_title]
+                users_with_title = [u for u in group_data if u.llm_title]
+                
+                if users_with_title:
+                    self.logger.info(f"跳过 {len(users_with_title)} 个已有持久化头衔的用户，保留现有头衔")
+                
+                titles = None
+                token_usage = None
+                if users_need_llm:
+                    self.logger.info(f"为 {len(users_need_llm)} 个无头衔用户调用LLM生成头衔")
+                    titles, token_usage = await llm_analyzer.analyze_users(
+                        users_need_llm, grp_name, min_daily_messages=min_daily
+                    )
+                
+                if token_usage and token_usage.get("total_tokens", 0) > 0:
+                    token_usage_info = token_usage
+                
+                # 构建titles_map：已有头衔 + 新生成的头衔
+                titles_map = {}
+                for user in group_data:
+                    if user.llm_title:
+                        titles_map[user.user_id] = {
+                            "title": user.llm_title,
+                            "color": user.llm_title_color or "#7C3AED"
+                        }
+                
                 if titles:
-                    self.logger.info(f"✅ LLM 头衔生成成功: 为 {len(titles)} 个用户生成了头衔")
-                    titles_map = titles
+                    self.logger.info(f"✅ LLM头衔生成成功: 为 {len(titles)} 个新用户生成了头衔")
                     for user in group_data:
                         if user.user_id in titles:
                             info = titles[user.user_id]
                             if isinstance(info, dict):
-                                user.display_title = info.get("title")
-                                user.display_title_color = info.get("color")
+                                title_text = info.get("title")
+                                title_color = info.get("color")
+                                user.display_title = title_text
+                                user.display_title_color = title_color
+                                user.llm_title = title_text
+                                user.llm_title_color = title_color
                             else:
-                                user.display_title = info
-
+                                title_text = info
+                                user.display_title = title_text
+                                user.display_title_color = None
+                                user.llm_title = title_text
+                                user.llm_title_color = None
+                            titles_map[user.user_id] = {
+                                "title": user.llm_title,
+                                "color": user.llm_title_color or "#7C3AED"
+                            }
+                    # 持久化头衔到文件
+                    await self.data_manager.save_group_data(group_id, group_data)
+                    self.logger.info("定时推送头衔数据已持久化保存到文件")
                 else:
-                    self.logger.warning("⚠️ LLM 头衔生成结果为空，将使用不带头衔的排行榜")
+                    self.logger.info(f"所有用户已有持久化头衔，无需LLM分析，使用已有头衔")
             except Exception as e:
                 self.logger.error(f"❌ LLM 头衔生成异常: {e}", exc_info=True)
                 self.logger.info("将使用不带头衔的排行榜继续推送")
@@ -719,7 +799,8 @@ class TimerManager:
             users_for_rank.append(user_data)
         
         # 创建群组信息
-        group_info = GroupInfo(group_id=str(group_id))
+        unified_msg_origin = self.group_unified_msg_origins.get(str(group_id), "")
+        group_info = GroupInfo(group_id=str(group_id), unified_msg_origin=unified_msg_origin)
         # 获取群组名称
         group_name = await self._get_group_name(group_id)
         group_info.group_name = group_name
@@ -734,14 +815,16 @@ class TimerManager:
             return False
         
         # 定时推送只发送图片，不发送文字消息
-        success = await self.push_service.push_to_group(group_id, "", image_path)
-        
-        # 清理临时图片文件
-        if image_path and await aiofiles.os.path.exists(image_path):
-            try:
-                await aiofiles.os.unlink(image_path)
-            except OSError as e:
-                self.logger.warning(f"清理临时图片文件失败: {image_path}, 错误: {e}")
+        try:
+            success = await self.push_service.push_to_group(group_id, "", image_path)
+        finally:
+            # 清理临时图片文件（确保无论push_to_group是否异常都执行）
+            if image_path:
+                try:
+                    if await aiofiles.os.path.exists(image_path):
+                        await aiofiles.os.unlink(image_path)
+                except Exception as e:
+                    self.logger.warning(f"清理临时图片文件失败: {image_path}, 错误: {e}")
         
         return success
     

@@ -8,10 +8,12 @@ import asyncio
 import os
 import re
 import aiofiles
-import json
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Set
+
+# 使用 orjson 替代标准 json 以获得 2-5 倍性能
+import orjson
 
 # AstrBot框架导入
 from astrbot.api.event import filter, AstrMessageEvent
@@ -58,7 +60,11 @@ from .utils.constants import (
     GROUP_MEMBERS_CACHE_TTL as CACHE_TTL_SECONDS
 )
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.0")
+# 导入统一异常处理器，简化命令方法的异常处理
+from .utils.exception_handlers import ExceptionHandler
+
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.2")
+
 class MessageStatsPlugin(Star):
     """群发言统计插件
     
@@ -143,6 +149,11 @@ class MessageStatsPlugin(Star):
         self._web_group_name_cache: Dict[str, str] = {}
         self._load_group_names()
         
+        # ---------- 脏标记批量保存优化 ----------
+        self._umo_dirty = False          # UMO 脏标记
+        self._group_names_dirty = False  # 群名脏标记
+        self._save_task: Optional[asyncio.Task] = None  # 后台保存任务
+        
         # 成员缓存管理器 - 管理群成员列表缓存和用户昵称缓存
         # 使用分层缓存策略（昵称缓存 → 字典缓存 → API获取），
         # 并在API请求外层添加异步锁防止缓存击穿
@@ -156,13 +167,28 @@ class MessageStatsPlugin(Star):
         self.timer_manager = None
         from quart import jsonify
         self._jsonify = jsonify
+        
+        # 屏蔽用户/群聊的 set 缓存（避免每次比较都创建新列表）
+        # 在 _convert_to_plugin_config() 之后初始化
+        self._init_blocked_sets()
+        
+        # 里程碑目标 set 缓存
+        self._milestone_set: Set[int] = set(getattr(self.plugin_config, 'milestone_targets', []))
+    def _init_blocked_sets(self):
+        """初始化屏蔽用户/群聊的 set 缓存"""
+        if self.plugin_config:
+            self._blocked_user_set: Set[str] = set(str(uid) for uid in getattr(self.plugin_config, 'blocked_users', []))
+            self._blocked_group_set: Set[str] = set(str(gid) for gid in getattr(self.plugin_config, 'blocked_groups', []))
+        else:
+            self._blocked_user_set: Set[str] = set()
+            self._blocked_group_set: Set[str] = set()
+    
     def _load_unified_msg_origins(self):
         """从文件加载持久化的 unified_msg_origin 映射表"""
         try:
             if self._umo_file.exists():
-                import json
                 with open(str(self._umo_file), 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+                    data = orjson.loads(f.read())
                 if isinstance(data, dict):
                     self.group_unified_msg_origins = data
                     self.logger.info(f"已加载 unified_msg_origin 映射表: {len(data)} 条记录")
@@ -173,9 +199,8 @@ class MessageStatsPlugin(Star):
         """将 unified_msg_origin 映射表保存到文件"""
         try:
             self._umo_file.parent.mkdir(parents=True, exist_ok=True)
-            import json
             with open(str(self._umo_file), 'w', encoding='utf-8') as f:
-                json.dump(self.group_unified_msg_origins, f, ensure_ascii=False, indent=2)
+                f.write(orjson.dumps(self.group_unified_msg_origins).decode('utf-8'))
         except Exception as e:
             self.logger.debug(f"保存 unified_msg_origin 文件失败: {e}")
 
@@ -183,9 +208,8 @@ class MessageStatsPlugin(Star):
         """从文件加载持久化的群组名称缓存"""
         try:
             if self._group_names_file.exists():
-                import json
                 with open(str(self._group_names_file), 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+                    data = orjson.loads(f.read())
                 if isinstance(data, dict):
                     self._web_group_name_cache = data
                     self.logger.info(f"已加载群组名称缓存: {len(data)} 条记录")
@@ -196,9 +220,8 @@ class MessageStatsPlugin(Star):
         """将群组名称持久化到文件"""
         try:
             self._group_names_file.parent.mkdir(parents=True, exist_ok=True)
-            import json
             with open(str(self._group_names_file), 'w', encoding='utf-8') as f:
-                json.dump(self._web_group_name_cache, f, ensure_ascii=False, indent=2)
+                f.write(orjson.dumps(self._web_group_name_cache).decode('utf-8'))
         except Exception as e:
             self.logger.debug(f"保存群组名称文件失败: {e}")
     
@@ -217,7 +240,7 @@ class MessageStatsPlugin(Star):
                 tu = []
                 for u in act[:self.plugin_config.rand]:
                     pct = (u.message_count/tm*100) if tm>0 else 0
-                    tu.append({"nickname":u.nickname,"message_count":u.message_count,"title":u.display_title or "","last_date":u.last_date or "","percentage":round(pct,1)})
+                    tu.append({"nickname":u.nickname,"message_count":u.message_count,"title":u.llm_title or u.display_title or "","title_color":u.llm_title_color or u.display_title_color or "","last_date":u.last_date or "","percentage":round(pct,1)})
                 fp2 = self.data_manager.groups_dir / f"{gid}.json"
                 fs2 = ""
                 if fp2.exists():
@@ -285,6 +308,12 @@ class MessageStatsPlugin(Star):
                         theme_times['dark'] = config_dict.pop('theme_switch_dark_time')
                     config_dict['theme_switch_times'] = theme_times
             
+            # 如果 llm_system_prompt 为空，回填默认提示词
+            # 用户保存 Web 配置后空值会被持久化，升级时也不会被 schema 默认值覆盖
+            if not config_dict.get('llm_system_prompt', ''):
+                from .utils.llm_analyzer import DEFAULT_SYSTEM_PROMPT as default_prompt
+                config_dict['llm_system_prompt'] = default_prompt
+            
             # 使用PluginConfig.from_dict()方法进行安全的配置转换
             config = PluginConfig.from_dict(config_dict)
             return config
@@ -315,6 +344,7 @@ class MessageStatsPlugin(Star):
                 
                 # 从 unified_msg_origin 中提取群组ID（格式如 "Amydd:GroupMessage:-1003715592711"）
                 # 提取最后一个 ":" 之后的部分作为备用键
+                extracted_id = None
                 try:
                     extracted_id = unified_msg_origin.rsplit(':', 1)[-1]
                     if extracted_id and extracted_id != group_id_str:
@@ -326,8 +356,8 @@ class MessageStatsPlugin(Star):
                 # 这样无论 timer_target_groups 中填的是群号还是 unified_msg_origin 都能匹配
                 self.group_unified_msg_origins[unified_msg_origin] = unified_msg_origin
                 
-                # 持久化到文件（重启后自动恢复）
-                self._save_unified_msg_origins()
+                # 标记 UMO 脏标记，由后台批量保存
+                self._umo_dirty = True
                 
                 if old_origin != unified_msg_origin:
                     self.logger.info(f"已收集群组 {group_id} 的 unified_msg_origin")
@@ -344,7 +374,7 @@ class MessageStatsPlugin(Star):
                         #   2. unified_msg_origin 字符串（如 Amy:GroupMessage:1081839722）
                         is_target_group = False
                         for target_id in self.plugin_config.timer_target_groups:
-                            if group_id_str == target_id or extracted_id == target_id or unified_msg_origin == target_id:
+                            if group_id_str == target_id or (extracted_id is not None and extracted_id == target_id) or unified_msg_origin == target_id:
                                 is_target_group = True
                                 break
                         
@@ -390,7 +420,7 @@ class MessageStatsPlugin(Star):
                 old_name = self._web_group_name_cache.get(group_id_str)
                 if old_name != group_name:
                     self._web_group_name_cache[group_id_str] = group_name
-                    self._save_group_names()
+                    self._group_names_dirty = True
                     self.logger.info(f"已获取群组 {group_id} 的名称: {group_name}")
                 
                 # 更新到 timer_manager 的内存缓存
@@ -454,6 +484,9 @@ class MessageStatsPlugin(Star):
             # 步骤5: 设置缓存和最终初始化状态
             await self._setup_caches()
             
+            # 启动后台批量保存任务（优化A）
+            await self._start_background_save()
+            
             self.logger.info("群发言统计插件初始化完成")
             
         except (OSError, IOError) as e:
@@ -487,6 +520,11 @@ class MessageStatsPlugin(Star):
         """
         # 更新插件配置（从AstrBot配置转换）
         self.plugin_config = self._convert_to_plugin_config()
+        
+        # 同步更新缓存 set
+        self._milestone_set = set(self.plugin_config.milestone_targets)
+        self._blocked_user_set = set(str(uid) for uid in self.plugin_config.blocked_users)
+        self._blocked_group_set = set(str(gid) for gid in self.plugin_config.blocked_groups)
         
         # 创建图片生成器
         self.image_generator = ImageGenerator(self.plugin_config)
@@ -574,29 +612,55 @@ class MessageStatsPlugin(Star):
                 self.logger.warning(f"定时任务启动失败(参数错误): {e}")
                 # 不影响插件的正常使用
     
+    # ========== 脏标记批量保存（优化A） ==========
+    
+    async def _start_background_save(self):
+        """启动后台批量保存任务，每5分钟刷一次脏数据到磁盘"""
+        if self._save_task and not self._save_task.done():
+            return
+        self._save_task = asyncio.create_task(self._background_save_loop())
+        self.logger.debug("后台批量保存任务已启动")
+    
+    async def _stop_background_save(self):
+        """停止后台保存任务并立即刷盘"""
+        if self._save_task and not self._save_task.done():
+            self._save_task.cancel()
+            try:
+                await self._save_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._save_task = None
+        # 停止时强制刷所有脏数据
+        await self._flush_dirty_data()
+    
+    async def _flush_dirty_data(self):
+        """刷所有脏标记的数据到磁盘"""
+        if self._umo_dirty:
+            self._save_unified_msg_origins()
+            self._umo_dirty = False
+        if self._group_names_dirty:
+            self._save_group_names()
+            self._group_names_dirty = False
+    
+    async def _background_save_loop(self):
+        """后台循环：每5分钟检查并写入脏数据"""
+        try:
+            while True:
+                await asyncio.sleep(600)  # 10分钟（仅检查脏标记，无脏数据不写盘）
+                await self._flush_dirty_data()
+        except asyncio.CancelledError:
+            await self._flush_dirty_data()
+            raise
+    
     async def terminate(self):
-        """插件卸载清理
-        
-        异步清理插件的所有资源,包括浏览器实例、缓存和临时文件.
-        确保插件卸载时不会留下资源泄漏.
-        
-        Raises:
-            OSError: 当清理文件或目录失败时抛出
-            IOError: 当文件操作失败时抛出
-            Exception: 其他清理相关的异常
-            
-        Returns:
-            None: 无返回值,清理完成后设置initialized状态为False
-            
-        Example:
-            >>> await plugin.terminate()
-            >>> print(plugin.initialized)
-            False
-        """
+        """插件卸载清理"""
         try:
             self.logger.info("群发言统计插件卸载中...")
             
-            # 刷新所有脏数据到磁盘（延迟写入优化）
+            # 停止后台保存并刷脏数据
+            await self._stop_background_save()
+            
+            # 刷新数据管理器的脏数据
             await self.data_manager.flush_all()
             
             # 清理图片生成器
@@ -701,29 +765,8 @@ class MessageStatsPlugin(Star):
             # 步骤3: 处理消息统计和记录
             await self._process_message_stats(group_id, user_id, nickname)
             
-        except ValueError as e:
-            self.logger.error(f"记录消息统计失败(参数验证错误): {e}", exc_info=True)
-        except TypeError as e:
-            self.logger.error(f"记录消息统计失败(类型错误): {e}", exc_info=True)
-        except KeyError as e:
-            self.logger.error(f"记录消息统计失败(数据格式错误): {e}", exc_info=True)
-        except asyncio.TimeoutError as e:
-            self.logger.error(f"记录消息统计失败(超时错误): {e}", exc_info=True)
-        except ConnectionError as e:
-            self.logger.error(f"记录消息统计失败(连接错误): {e}", exc_info=True)
-        except asyncio.CancelledError as e:
-            self.logger.error(f"记录消息统计失败(操作取消): {e}", exc_info=True)
-        except (IOError, OSError) as e:
-            self.logger.error(f"记录消息统计失败(系统错误): {e}", exc_info=True)
-        except AttributeError as e:
-            self.logger.error(f"记录消息统计失败(属性错误): {e}", exc_info=True)
-        except RuntimeError as e:
-            self.logger.error(f"记录消息统计失败(运行时错误): {e}", exc_info=True)
-        except ImportError as e:
-            self.logger.error(f"记录消息统计失败(导入错误): {e}", exc_info=True)
-        except (FileNotFoundError, PermissionError, UnicodeError, MemoryError, SystemError) as e:
-            # 修复：替换过于宽泛的Exception为具体异常类型
-            self.logger.error(f"记录消息统计失败(系统资源错误): {e}", exc_info=True)
+        except Exception as e:
+            self.logger.error(f"记录消息统计失败({type(e).__name__}): {e}", exc_info=True)
     
     @data_operation_handler('validate', '消息数据参数')
     async def _validate_message_data(self, group_id: str, user_id: str, nickname: str) -> tuple:
@@ -791,22 +834,15 @@ class MessageStatsPlugin(Star):
         """检测用户发言是否达到里程碑，达到则自动推送个人成就卡片
         
         性能优化：仅在 milestone_enabled=True 且 current_count 在 milestone_targets 中时才执行后续操作。
-        使用缓存防止同一里程碑重复推送。
-        推送个人成就卡片而非整个排行榜，减少数据查询和渲染开销。
-        
-        Args:
-            group_id (str): 群组ID
-            user_id (str): 用户ID
-            nickname (str): 用户昵称
-            current_count (int): 用户当前总发言数（由 update_user_message 直接返回）
+        使用缓存（_milestone_set）防止重复创建 set，使用里程碑缓存防止重复推送。
         """
         # 快速短路：里程碑功能未启用或目标列表为空，直接返回
         if not self.plugin_config.milestone_enabled or not self.plugin_config.milestone_targets:
             return
         
-        # 快速检查：当前发言数是否在里程碑目标中（O(1) 集合查找）
-        milestone_set = set(self.plugin_config.milestone_targets)
-        if current_count not in milestone_set:
+        # 使用缓存的 milestone_set，避免每次创建 O(n) 的 set
+        # 同时在 _load_plugin_config 中同步更新
+        if current_count not in self._milestone_set:
             return
         
         # 检查是否已经推送过该里程碑（使用缓存防止重复推送）
@@ -866,7 +902,8 @@ class MessageStatsPlugin(Star):
                 last_date = target_user_data.last_date
             
             # 创建群组信息
-            group_info = GroupInfo(group_id=str(group_id))
+            unified_msg_origin = self.group_unified_msg_origins.get(str(group_id), "")
+            group_info = GroupInfo(group_id=str(group_id), unified_msg_origin=unified_msg_origin)
             group_name = await self._get_group_name(None, group_id)
             group_info.group_name = group_name
             
@@ -893,16 +930,17 @@ class MessageStatsPlugin(Star):
             message_chain = MessageChain()
             message_chain = message_chain.file_image(image_path)
             
-            await self.context.send_message(unified_msg_origin, message_chain)
-            self.logger.info(f"✅ 里程碑推送成功: {nickname} 发言 {current_count} 次")
-            
-            # 清理临时图片
-            import aiofiles
-            if await aiofiles.os.path.exists(image_path):
-                try:
-                    await aiofiles.os.unlink(image_path)
-                except OSError as e:
-                    self.logger.warning(f"清理里程碑图片失败: {e}")
+            try:
+                await self.context.send_message(unified_msg_origin, message_chain)
+                self.logger.info(f"✅ 里程碑推送成功: {nickname} 发言 {current_count} 次")
+            finally:
+                # 清理临时图片（确保无论send_message是否异常都执行）
+                if image_path:
+                    try:
+                        if await aiofiles.os.path.exists(image_path):
+                            await aiofiles.os.unlink(image_path)
+                    except Exception as e:
+                        self.logger.warning(f"清理里程碑图片失败: {e}")
                     
         except Exception as e:
             self.logger.error(f"里程碑推送失败: {e}", exc_info=True)
@@ -979,7 +1017,8 @@ class MessageStatsPlugin(Star):
                 last_date = target_user_data.last_date
             
             # 创建群组信息
-            group_info = GroupInfo(group_id=str(group_id))
+            unified_msg_origin = self.group_unified_msg_origins.get(str(group_id), "")
+            group_info = GroupInfo(group_id=str(group_id), unified_msg_origin=unified_msg_origin)
             group_name = await self._get_group_name(event, group_id)
             group_info.group_name = group_name
             
@@ -1002,14 +1041,16 @@ class MessageStatsPlugin(Star):
                 return
             
             # 使用框架标准的 image_result 返回图片
-            yield event.image_result(image_path)
-            
-            # 清理临时图片文件
-            if await aiofiles.os.path.exists(image_path):
-                try:
-                    await aiofiles.os.unlink(image_path)
-                except OSError as e:
-                    self.logger.warning(f"清理里程碑临时图片失败: {image_path}, 错误: {e}")
+            try:
+                yield event.image_result(image_path)
+            finally:
+                # 清理临时图片文件（确保无论yield后续是否执行都清理）
+                if image_path:
+                    try:
+                        if await aiofiles.os.path.exists(image_path):
+                            await aiofiles.os.unlink(image_path)
+                    except Exception as e:
+                        self.logger.warning(f"清理里程碑临时图片失败: {image_path}, 错误: {e}")
                     
         except Exception as e:
             self.logger.error(f"里程碑获取失败: {e}", exc_info=True)
@@ -1090,27 +1131,8 @@ class MessageStatsPlugin(Star):
             
             yield event.plain_result(f"排行榜显示人数已设置为 {count} 人！")
             
-        except ValueError as e:
-            self.logger.error(f"设置排行榜数量失败(参数错误): {e}", exc_info=True)
-            yield event.plain_result("设置失败,请稍后重试")
-        except TypeError as e:
-            self.logger.error(f"设置排行榜数量失败(类型错误): {e}", exc_info=True)
-            yield event.plain_result("设置失败,请稍后重试")
-        except KeyError as e:
-            self.logger.error(f"设置排行榜数量失败(数据格式错误): {e}", exc_info=True)
-            yield event.plain_result("设置失败,请稍后重试")
-        except (IOError, OSError, FileNotFoundError) as e:
-            self.logger.error(f"设置排行榜数量失败(文件操作错误): {e}", exc_info=True)
-            yield event.plain_result("设置失败,请稍后重试")
-        except AttributeError as e:
-            self.logger.error(f"设置排行榜数量失败(属性错误): {e}", exc_info=True)
-            yield event.plain_result("设置失败,请稍后重试")
-        except RuntimeError as e:
-            self.logger.error(f"设置排行榜数量失败(运行时错误): {e}", exc_info=True)
-            yield event.plain_result("设置失败,请稍后重试")
-        except (ConnectionError, asyncio.TimeoutError, ImportError, PermissionError) as e:
-            # 修复：替换过于宽泛的Exception为具体异常类型
-            self.logger.error(f"设置排行榜数量失败(网络或系统错误): {e}", exc_info=True)
+        except Exception as e:
+            self.logger.error(f"设置排行榜数量失败: {e}", exc_info=True)
             yield event.plain_result("设置失败,请稍后重试")
 
     @filter.command("设置发言榜图片")
@@ -1158,27 +1180,8 @@ class MessageStatsPlugin(Star):
             
             yield event.plain_result(f"排行榜显示模式已设置为 {mode_text}！")
             
-        except ValueError as e:
-            self.logger.error(f"设置图片模式失败(参数错误): {e}", exc_info=True)
-            yield event.plain_result("设置失败,请稍后重试")
-        except TypeError as e:
-            self.logger.error(f"设置图片模式失败(类型错误): {e}", exc_info=True)
-            yield event.plain_result("设置失败,请稍后重试")
-        except KeyError as e:
-            self.logger.error(f"设置图片模式失败(数据格式错误): {e}", exc_info=True)
-            yield event.plain_result("设置失败,请稍后重试")
-        except (IOError, OSError, FileNotFoundError) as e:
-            self.logger.error(f"设置图片模式失败(文件操作错误): {e}", exc_info=True)
-            yield event.plain_result("设置失败,请稍后重试")
-        except AttributeError as e:
-            self.logger.error(f"设置图片模式失败(属性错误): {e}", exc_info=True)
-            yield event.plain_result("设置失败,请稍后重试")
-        except RuntimeError as e:
-            self.logger.error(f"设置图片模式失败(运行时错误): {e}", exc_info=True)
-            yield event.plain_result("设置失败,请稍后重试")
-        except (ConnectionError, asyncio.TimeoutError, ImportError, PermissionError) as e:
-            # 修复：替换过于宽泛的Exception为具体异常类型
-            self.logger.error(f"设置图片模式失败(网络或系统错误): {e}", exc_info=True)
+        except Exception as e:
+            self.logger.error(f"设置图片模式失败: {e}", exc_info=True)
             yield event.plain_result("设置失败,请稍后重试")
     
     @filter.command("清除发言榜单")
@@ -1220,23 +1223,8 @@ class MessageStatsPlugin(Star):
             else:
                 yield event.plain_result("刷新缓存失败,请稍后重试！")
             
-        except AttributeError as e:
-            self.logger.error(f"刷新群成员缓存失败(属性错误): {e}", exc_info=True)
-            yield event.plain_result("刷新缓存失败,请稍后重试！")
-        except KeyError as e:
-            self.logger.error(f"刷新群成员缓存失败(数据格式错误): {e}", exc_info=True)
-            yield event.plain_result("刷新缓存失败,请稍后重试！")
-        except TypeError as e:
-            self.logger.error(f"刷新群成员缓存失败(类型错误): {e}", exc_info=True)
-            yield event.plain_result("刷新缓存失败,请稍后重试！")
-        except (IOError, OSError) as e:
-            self.logger.error(f"刷新群成员缓存失败(系统错误): {e}", exc_info=True)
-            yield event.plain_result("刷新缓存失败,请稍后重试！")
-        except RuntimeError as e:
-            self.logger.error(f"刷新群成员缓存失败(运行时错误): {e}", exc_info=True)
-            yield event.plain_result("刷新缓存失败,请稍后重试！")
-        except (ConnectionError, asyncio.TimeoutError, ImportError, PermissionError) as e:
-            self.logger.error(f"刷新群成员缓存失败(网络或系统错误): {e}", exc_info=True)
+        except Exception as e:
+            self.logger.error(f"刷新群成员缓存失败: {e}", exc_info=True)
             yield event.plain_result("刷新缓存失败,请稍后重试！")
     
     @filter.command("发言榜缓存状态")
@@ -1266,27 +1254,8 @@ class MessageStatsPlugin(Star):
             
             yield event.plain_result('\n'.join(status_msg))
             
-        except ValueError as e:
-            self.logger.error(f"显示缓存状态失败(参数错误): {e}", exc_info=True)
-            yield event.plain_result("获取缓存状态失败,请稍后重试！")
-        except TypeError as e:
-            self.logger.error(f"显示缓存状态失败(类型错误): {e}", exc_info=True)
-            yield event.plain_result("获取缓存状态失败,请稍后重试！")
-        except KeyError as e:
-            self.logger.error(f"显示缓存状态失败(数据格式错误): {e}", exc_info=True)
-            yield event.plain_result("获取缓存状态失败,请稍后重试！")
-        except (IOError, OSError) as e:
-            self.logger.error(f"显示缓存状态失败(系统错误): {e}", exc_info=True)
-            yield event.plain_result("获取缓存状态失败,请稍后重试！")
-        except AttributeError as e:
-            self.logger.error(f"显示缓存状态失败(属性错误): {e}", exc_info=True)
-            yield event.plain_result("获取缓存状态失败,请稍后重试！")
-        except RuntimeError as e:
-            self.logger.error(f"显示缓存状态失败(运行时错误): {e}", exc_info=True)
-            yield event.plain_result("获取缓存状态失败,请稍后重试！")
-        except (ConnectionError, asyncio.TimeoutError, ImportError, PermissionError) as e:
-            # 修复：替换过于宽泛的Exception为具体异常类型
-            self.logger.error(f"显示缓存状态失败(网络或系统错误): {e}", exc_info=True)
+        except Exception as e:
+            self.logger.error(f"显示缓存状态失败: {e}", exc_info=True)
             yield event.plain_result("获取缓存状态失败,请稍后重试！")
     
     # ========== 私有方法 ==========
@@ -1335,48 +1304,12 @@ class MessageStatsPlugin(Star):
         self.member_cache.clear_user_cache(user_id)
     
     def _is_blocked_user(self, user_id: str) -> bool:
-        """检查用户是否在屏蔽列表中
-        
-        Args:
-            user_id (str): 用户ID
-            
-        Returns:
-            bool: 如果用户在屏蔽列表中返回True，否则返回False
-        """
-        if not hasattr(self, 'plugin_config') or not self.plugin_config:
-            return False
-        
-        blocked_users = getattr(self.plugin_config, 'blocked_users', [])
-        if not blocked_users:
-            return False
-        
-        # 将用户ID转换为字符串进行比较
-        user_id_str = str(user_id)
-        
-        # 检查是否在屏蔽列表中
-        return user_id_str in [str(uid) for uid in blocked_users]
+        """检查用户是否在屏蔽列表中（使用 set 缓存，O(1) 查询）"""
+        return str(user_id) in self._blocked_user_set
     
     def _is_blocked_group(self, group_id: str) -> bool:
-        """检查群聊是否在屏蔽列表中
-        
-        Args:
-            group_id (str): 群聊ID
-            
-        Returns:
-            bool: 如果群聊在屏蔽列表中返回True，否则返回False
-        """
-        if not hasattr(self, 'plugin_config') or not self.plugin_config:
-            return False
-        
-        blocked_groups = getattr(self.plugin_config, 'blocked_groups', [])
-        if not blocked_groups:
-            return False
-        
-        # 将群聊ID转换为字符串进行比较
-        group_id_str = str(group_id)
-        
-        # 检查是否在屏蔽列表中
-        return group_id_str in [str(gid) for gid in blocked_groups]
+        """检查群聊是否在屏蔽列表中（使用 set 缓存，O(1) 查询）"""
+        return str(group_id) in self._blocked_group_set
     
     async def _get_group_members_cache(self, event: AstrMessageEvent, group_id: str) -> Optional[List[Dict[str, Any]]]:
         """获取群成员缓存（委托给 MemberCacheManager）"""
@@ -1461,28 +1394,67 @@ class MessageStatsPlugin(Star):
                         
                         grp_name = group_info.group_name or f"群{group_id}"
                         
-                        # 只分析排行榜上实际显示的用户（与 config.rand 绑定）
-                        # 未上榜的用户生成的头衔不会显示，分析纯属浪费 Token
+                        # 只分析排行榜上实际显示的用户中还没有持久化头衔的用户
+                        # 已有持久化头衔的用户跳过LLM分析，保持头衔不变，避免每次都不一样
                         ranked_users_for_llm = [user for user, _ in filtered_data[:config.rand]]
-                        titles, token_usage = await llm_analyzer.analyze_users(
-                            ranked_users_for_llm, grp_name, min_daily_messages=min_daily
-                        )
+                        users_need_llm = [u for u in ranked_users_for_llm if not u.llm_title]
+                        users_with_title = [u for u in ranked_users_for_llm if u.llm_title]
+                        
+                        if users_with_title:
+                            self.logger.info(f"跳过 {len(users_with_title)} 个已有持久化头衔的用户，保留现有头衔")
+                        
+                        titles = None
+                        token_usage = None
+                        if users_need_llm:
+                            self.logger.info(f"为 {len(users_need_llm)} 个无头衔用户调用LLM生成头衔")
+                            titles, token_usage = await llm_analyzer.analyze_users(
+                                users_need_llm, grp_name, min_daily_messages=min_daily
+                            )
                         
                         if token_usage and token_usage.get("total_tokens", 0) > 0:
                             token_usage_info = token_usage
                         
+                        # 构建完整的titles_map：已有头衔 + 新生成的头衔
+                        titles_map = {}
+                        
+                        # 1. 先加载已有持久化头衔
+                        for user_data_item, _ in filtered_data:
+                            if user_data_item.llm_title:
+                                titles_map[user_data_item.user_id] = {
+                                    "title": user_data_item.llm_title,
+                                    "color": user_data_item.llm_title_color or "#7C3AED"
+                                }
+                        
+                        # 2. 再合并新生成的头衔（覆盖旧头衔，因为LLM可能对之前无头衔的用户生成了新头衔）
                         if titles:
-                            self.logger.info(f"✅ 手动LLM头衔生成成功: 为 {len(titles)} 个用户生成了头衔")
-                            # 保存头衔映射，同时设置到 user.display_title
-                            titles_map = titles
+                            self.logger.info(f"✅ LLM头衔生成成功: 为 {len(titles)} 个新用户生成了头衔")
                             for user_data_item, _ in filtered_data:
                                 if user_data_item.user_id in titles:
                                     info = titles[user_data_item.user_id]
                                     if isinstance(info, dict):
-                                        user_data_item.display_title = info.get("title")
-                                        user_data_item.display_title_color = info.get("color")
+                                        title_text = info.get("title")
+                                        title_color = info.get("color")
+                                        user_data_item.display_title = title_text
+                                        user_data_item.display_title_color = title_color
                                     else:
-                                        user_data_item.display_title = info
+                                        title_text = info
+                                        user_data_item.display_title = title_text
+                                        user_data_item.display_title_color = None
+                                    # 写入持久化字段
+                                    user_data_item.llm_title = title_text
+                                    user_data_item.llm_title_color = title_color if isinstance(info, dict) else None
+                                    titles_map[user_data_item.user_id] = {
+                                        "title": user_data_item.llm_title,
+                                        "color": user_data_item.llm_title_color or "#7C3AED"
+                                    }
+                            # 保存群组数据到文件，确保头衔持久化
+                            group_data_for_save = await self.data_manager.get_group_data(group_id)
+                            if group_data_for_save:
+                                await self.data_manager.save_group_data(group_id, group_data_for_save)
+                                self.logger.info("头衔数据已持久化保存到文件")
+                        else:
+                            self.logger.info(f"所有用户已有持久化头衔，无需LLM分析，使用已有头衔")
+
 
                 except Exception as e:
                     self.logger.error(f"❌ 手动LLM头衔生成异常: {e}", exc_info=True)
@@ -1539,8 +1511,17 @@ class MessageStatsPlugin(Star):
         if not group_data:
             return None
         
+        # 加载持久化的头衔到运行时字段
+        # 确保即使不触发LLM分析，排行榜也能显示已有的头衔
+        for user in group_data:
+            if user.llm_title:
+                user.display_title = user.llm_title
+                if user.llm_title_color:
+                    user.display_title_color = user.llm_title_color
+        
         # 显示排行榜前强制刷新昵称缓存，确保昵称准确性
         await self._refresh_nickname_cache_for_ranking(event, group_id, group_data)
+
         
         # 根据类型筛选数据并获取排序值
         filtered_data_with_values = await self._filter_data_by_rank_type(group_data, rank_type)
@@ -1558,7 +1539,8 @@ class MessageStatsPlugin(Star):
         title = self._generate_title(rank_type)
         
         # 创建群组信息
-        group_info = GroupInfo(group_id=group_id)
+        unified_msg_origin = self.group_unified_msg_origins.get(group_id, "")
+        group_info = GroupInfo(group_id=group_id, unified_msg_origin=unified_msg_origin)
         
         # 获取群名称
         group_name = await self._get_group_name(event, group_id)
@@ -1728,35 +1710,11 @@ class MessageStatsPlugin(Star):
         # 时间段过滤：优化版本，使用预聚合策略减少双重循环
         # 策略：如果时间段较短（日榜），直接计算；如果时间段较长（周榜/月榜），使用缓存
         
-        # 对于日榜，直接计算（因为时间段短，性能影响小）
-        if rank_type == RankType.DAILY:
-            return self._calculate_daily_rank(group_data, start_date, end_date)
-        
-        # 对于周榜和月榜，使用优化策略（现在是异步方法）
-        elif rank_type in [RankType.WEEKLY, RankType.MONTHLY, RankType.YEARLY, RankType.LAST_YEAR]:
+        # 所有时间段类型统一走批量优化路径
+        if rank_type in [RankType.DAILY, RankType.WEEKLY, RankType.MONTHLY, RankType.YEARLY, RankType.LAST_YEAR]:
             return await self._calculate_period_rank_optimized(group_data, start_date, end_date)
         
         return []
-    
-    @exception_handler(ExceptionConfig(log_exception=True, reraise=True))
-    def _calculate_daily_rank(self, group_data: List[UserData], start_date, end_date) -> List[tuple]:
-        """计算日榜（直接计算策略）"""
-        filtered_users = []
-        for user in group_data:
-            # 过滤屏蔽用户
-            if self._is_blocked_user(user.user_id):
-                continue
-            
-            # 检查是否有发言记录（兼容新旧两种存储格式）
-            if not user._message_dates and not user.history:
-                continue
-            
-            # 计算指定时间段的发言次数
-            period_count = user.get_message_count_in_period(start_date, end_date)
-            if period_count > 0:
-                filtered_users.append((user, period_count))
-        
-        return filtered_users
     
     async def _calculate_period_rank_optimized(self, group_data: List[UserData], start_date, end_date) -> List[tuple]:
         """计算周榜/月榜（优化策略）"""
@@ -1944,12 +1902,8 @@ class MessageStatsPlugin(Star):
             
             yield event.plain_result('\n'.join(status_lines))
             
-        except (IOError, OSError, KeyError) as e:
+        except (IOError, OSError, RuntimeError, AttributeError, ValueError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
             self.logger.error(f"获取定时状态失败: {e}")
-            yield event.plain_result("获取定时状态失败，请稍后重试！")
-        except (RuntimeError, AttributeError, ValueError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
-            # 修复：替换过于宽泛的Exception为具体异常类型
-            self.logger.error(f"获取定时状态失败(运行时错误): {e}")
             yield event.plain_result("获取定时状态失败，请稍后重试！")
     
     @filter.command("手动推送发言榜")
@@ -1982,12 +1936,8 @@ class MessageStatsPlugin(Star):
             else:
                 yield event.plain_result("❌ 手动推送执行失败！\n\n💡 可能的原因：\n• 缺少 unified_msg_origin\n• 群组权限不足\n\n🔧 解决方案：\n• 在群组中发送任意消息以收集 unified_msg_origin\n• 检查机器人是否有群组发言权限")
             
-        except (AttributeError, TypeError) as e:
+        except (AttributeError, TypeError, RuntimeError, ValueError, KeyError, ConnectionError, asyncio.TimeoutError) as e:
             self.logger.error(f"处理手动推送请求失败: {e}")
-            yield event.plain_result("处理请求失败，请稍后重试！")
-        except (RuntimeError, ValueError, KeyError, ConnectionError, asyncio.TimeoutError) as e:
-            # 修复：替换过于宽泛的Exception为具体异常类型
-            self.logger.error(f"处理手动推送请求失败(运行时错误): {e}")
             yield event.plain_result("处理请求失败，请稍后重试！")
     
     @filter.command("设置发言榜定时时间")
@@ -2053,15 +2003,8 @@ class MessageStatsPlugin(Star):
             else:
                 yield event.plain_result(f"✅ 定时推送配置已保存！\n• 推送时间：{time_str}\n• 目标群组：{group_id}\n• 排行榜类型：{rank_type_text}\n• 状态：配置保存成功\n\n💡 提示：定时管理器未初始化，请检查插件配置")
             
-        except ValueError as e:
+        except (ValueError, IOError, OSError, RuntimeError, AttributeError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
             self.logger.error(f"处理设置定时时间请求失败: {e}")
-            yield event.plain_result("时间格式错误，请使用 HH:MM 格式！")
-        except (IOError, OSError) as e:
-            self.logger.error(f"处理设置定时时间请求失败: {e}")
-            yield event.plain_result("保存配置失败，请稍后重试！")
-        except (RuntimeError, AttributeError, ValueError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
-            # 修复：替换过于宽泛的Exception为具体异常类型
-            self.logger.error(f"处理设置定时时间请求失败(运行时错误): {e}")
             yield event.plain_result("处理请求失败，请稍后重试！")
     
     @filter.command("设置发言榜定时群组")
@@ -2095,15 +2038,8 @@ class MessageStatsPlugin(Star):
             groups_text = "\n".join([f"   • {group_id}" for group_id in valid_groups])
             yield event.plain_result(f"✅ 定时推送目标群组已设置：\n{groups_text}")
             
-        except ValueError as e:
+        except (ValueError, IOError, OSError, RuntimeError, AttributeError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
             self.logger.error(f"处理设置定时群组请求失败: {e}")
-            yield event.plain_result("群组ID格式错误，请输入有效的群组ID！")
-        except (IOError, OSError) as e:
-            self.logger.error(f"处理设置定时群组请求失败: {e}")
-            yield event.plain_result("保存配置失败，请稍后重试！")
-        except (RuntimeError, AttributeError, ValueError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
-            # 修复：替换过于宽泛的Exception为具体异常类型
-            self.logger.error(f"处理设置定时群组请求失败(运行时错误): {e}")
             yield event.plain_result("处理请求失败，请稍后重试！")
     
     @filter.command("删除发言榜定时群组")
@@ -2160,15 +2096,8 @@ class MessageStatsPlugin(Star):
             else:
                 yield event.plain_result("⚠️ 未找到要删除的群组")
             
-        except ValueError as e:
+        except (ValueError, IOError, OSError, RuntimeError, AttributeError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
             self.logger.error(f"处理删除定时群组请求失败: {e}")
-            yield event.plain_result("群组ID格式错误，请输入有效的群组ID！")
-        except (IOError, OSError) as e:
-            self.logger.error(f"处理删除定时群组请求失败: {e}")
-            yield event.plain_result("保存配置失败，请稍后重试！")
-        except (RuntimeError, AttributeError, ValueError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
-            # 修复：替换过于宽泛的Exception为具体异常类型
-            self.logger.error(f"处理删除定时群组请求失败(运行时错误): {e}")
             yield event.plain_result("处理请求失败，请稍后重试！")
     
     @filter.command("启用发言榜定时")
@@ -2201,12 +2130,8 @@ class MessageStatsPlugin(Star):
             else:
                 yield event.plain_result("⚠️ 定时管理器未初始化！")
             
-        except (IOError, OSError) as e:
+        except (IOError, OSError, RuntimeError, AttributeError, ValueError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
             self.logger.error(f"处理启用定时请求失败: {e}")
-            yield event.plain_result("保存配置失败，请稍后重试！")
-        except (RuntimeError, AttributeError, ValueError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
-            # 修复：替换过于宽泛的Exception为具体异常类型
-            self.logger.error(f"处理启用定时请求失败(运行时错误): {e}")
             yield event.plain_result("处理请求失败，请稍后重试！")
     
     @filter.command("禁用发言榜定时")
@@ -2225,12 +2150,8 @@ class MessageStatsPlugin(Star):
             
             yield event.plain_result("✅ 定时推送功能已禁用！")
             
-        except (IOError, OSError) as e:
+        except (IOError, OSError, RuntimeError, AttributeError, ValueError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
             self.logger.error(f"处理禁用定时请求失败: {e}")
-            yield event.plain_result("保存配置失败，请稍后重试！")
-        except (RuntimeError, AttributeError, ValueError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
-            # 修复：替换过于宽泛的Exception为具体异常类型
-            self.logger.error(f"处理禁用定时请求失败(运行时错误): {e}")
             yield event.plain_result("处理请求失败，请稍后重试！")
     
     @filter.command("设置发言榜定时类型")
@@ -2263,55 +2184,14 @@ class MessageStatsPlugin(Star):
             type_text = self._get_rank_type_text(rank_type)
             yield event.plain_result(f"✅ 定时推送排行榜类型已设置为 {type_text}！")
             
-        except ValueError as e:
+        except (ValueError, IOError, OSError, RuntimeError, AttributeError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
             self.logger.error(f"处理设置定时类型请求失败: {e}")
-            yield event.plain_result("排行榜类型错误，请使用：total/daily/weekly/monthly")
-        except (IOError, OSError) as e:
-            self.logger.error(f"处理设置定时类型请求失败: {e}")
-            yield event.plain_result("保存配置失败，请稍后重试！")
-        except (RuntimeError, AttributeError, ValueError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
-            # 修复：替换过于宽泛的Exception为具体异常类型
-            self.logger.error(f"处理设置定时类型请求失败(运行时错误): {e}")
             yield event.plain_result("处理请求失败，请稍后重试！")
     
     # ========== 辅助方法 ==========
     
-    def _handle_command_exception(self, event: AstrMessageEvent, operation_name: str, exception: Exception) -> None:
-        """公共的异常处理方法
-
-        注意：此方法是同步方法。由于 event.plain_result() 在 async generator 上下文中
-        需要通过 yield 来发送消息，此方法只能记录日志并返回错误字符串供上层 yield。
-        直接调用 event.plain_result() 无法发送消息到聊天中。
-
-        Args:
-            event: 消息事件对象
-            operation_name: 操作名称，用于日志记录
-            exception: 异常对象
-
-        Returns:
-            None: 仅记录日志，消息通过返回的字符串由上层 yield 发送
-        """
-        if isinstance(exception, (KeyError, TypeError)):
-            self.logger.error(f"{operation_name}失败(数据格式错误): {exception}", exc_info=True)
-        elif isinstance(exception, (IOError, OSError, FileNotFoundError)):
-            self.logger.error(f"{operation_name}失败(文件操作错误): {exception}", exc_info=True)
-        elif isinstance(exception, ValueError):
-            self.logger.error(f"{operation_name}失败(参数错误): {exception}", exc_info=True)
-        elif isinstance(exception, RuntimeError):
-            self.logger.error(f"{operation_name}失败(运行时错误): {exception}", exc_info=True)
-        elif isinstance(exception, (ConnectionError, asyncio.TimeoutError, ImportError, PermissionError)):
-            self.logger.error(f"{operation_name}失败(网络或系统错误): {exception}", exc_info=True)
-        else:
-            self.logger.error(f"{operation_name}失败(未预期的错误类型 {type(exception).__name__}): {exception}", exc_info=True)
-    
     def _log_operation_result(self, operation_name: str, success: bool, details: str = ""):
-        """公共的操作结果日志记录方法，减少代码重复
-        
-        Args:
-            operation_name: 操作名称
-            success: 是否成功
-            details: 详细信息
-        """
+        """公共的操作结果日志记录方法，减少代码重复"""
         if success:
             self.logger.info(f"{operation_name}成功{details}")
         else:
