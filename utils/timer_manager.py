@@ -711,15 +711,6 @@ class TimerManager:
                     max_retries=max_retries
                 )
                 
-                # 获取群组名称用于提示词
-                grp_name = await self._get_group_name(group_id)
-                titles, token_usage = await llm_analyzer.analyze_users(
-                    group_data, grp_name, min_daily_messages=min_daily
-                )
-                
-                if token_usage and token_usage.get("total_tokens", 0) > 0:
-                    token_usage_info = token_usage
-                
                 # 筛选出还没有持久化头衔的用户，已有头衔的用户跳过LLM分析
                 users_need_llm = [u for u in group_data if u.message_count > 0 and not u.llm_title]
                 users_with_title = [u for u in group_data if u.llm_title]
@@ -731,6 +722,7 @@ class TimerManager:
                 token_usage = None
                 if users_need_llm:
                     self.logger.info(f"为 {len(users_need_llm)} 个无头衔用户调用LLM生成头衔")
+                    grp_name = await self._get_group_name(group_id)
                     titles, token_usage = await llm_analyzer.analyze_users(
                         users_need_llm, grp_name, min_daily_messages=min_daily
                     )
@@ -1237,7 +1229,16 @@ class TimerManager:
                 # 推送到所有配置群组
                 success_count = 0
                 for target_group in config.timer_target_groups:
-                    if await self._push_to_group(target_group, config):
+                    group_id_str = str(target_group).strip()
+                    actual_group_id = group_id_str
+                    if ':' in group_id_str:
+                        try:
+                            extracted = group_id_str.rsplit(':', 1)[-1]
+                            if extracted.lstrip('-').isdigit():
+                                actual_group_id = extracted
+                        except (AttributeError, IndexError, ValueError):
+                            pass
+                    if await self._push_to_group(actual_group_id, config):
                         success_count += 1
                 
                 return success_count > 0
