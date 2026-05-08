@@ -6,6 +6,7 @@ short_description: "统计群成员发言次数，支持多种排行榜和定时
 version: "1.9.3"
 
 repo: "https://github.com/xiaoruange39/astrbot_plugin_message_stats"
+astrbot_version: ">=4.16"
 support_platforms:
   - aiocqhttp
   - telegram

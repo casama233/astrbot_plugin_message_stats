@@ -781,7 +781,7 @@ class TimerManager:
         
         # 根据排行榜类型筛选数据
         # 定时推送强制使用今日排行榜
-        rank_type = RankType.DAILY
+        rank_type = self._parse_rank_type(config.timer_rank_type)
         filtered_data = await self._filter_data_by_rank_type(group_data, rank_type)
         if not filtered_data:
 
