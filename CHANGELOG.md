@@ -1,5 +1,18 @@
 # 更新日志
 
+## v1.9.4 (2026-05-09)
+
+### 🐛 Bug 修复
+
+- **定时/手动推送排行榜类型硬编码**：`_push_to_group()` 中硬编码 `RankType.DAILY`，导致用户在 WebUI 设置的 `timer_rank_type` 配置完全无效。已修复：改为读取 `config.timer_rank_type`，定时推送和手动推送均可使用用户配置的排行榜类型。
+- **`#手动推送发言榜` 群组ID格式解析错误**：当 `timer_target_groups` 中存储 `Amy:GroupMessage:1081839722` 格式时，`manual_push()` 直接传入 `_push_to_group()` 导致 `get_group_data()` 校验失败。已修复：统一添加 unified_msg_origin 格式的群组 ID 提取逻辑。
+- **LLM 头衔生成重复调用浪费 Tokens**：`_push_to_group()` 中先对全体用户调用 `llm_analyzer.analyze_users()` 后才筛选已有持久化头衔的用户，导致每次推送都浪费一次 LLM 调用。已修复：先筛选出无头衔用户，只对这部分用户调用 LLM。
+
+### 🧹 代码清理
+
+- **移除冗余 `pydantic` 依赖**：插件中未使用 pydantic，且 AstrBot 框架已自带，`requirements.txt` 中已移除。
+- **`metadata.yaml` 添加 `astrbot_version` 声明**：添加 `astrbot_version: ">=4.16"`，确保版本兼容性检查。
+
 ## v1.9.3 (2026-05-07)
 
 ### 🔐 安全改进
