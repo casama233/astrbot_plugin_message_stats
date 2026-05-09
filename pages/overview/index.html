@@ -97,8 +97,10 @@ BODY {
   -webkit-backdrop-filter:blur(16px) saturate(140%);
   border-radius:20px; margin:20px 0; box-shadow:var(--cs);
   border:1px solid var(--cb2); overflow:hidden;
-  transition:background .3s,border .3s,box-shadow .3s; position:relative
+  transition:background .3s,border .3s,box-shadow .3s, opacity .4s, transform .4s; position:relative
 }
+.c.fade-out { opacity:0; transform:translateY(12px) }
+.c.fade-in { opacity:1; transform:translateY(0) }
 .c-top { position:absolute; top:10px; right:10px; z-index:1 }
 .del-corner {
   display:inline-flex; align-items:center; padding:8px 16px;
@@ -125,10 +127,13 @@ li .B { font-size:13px; color:var(--c2); margin:4px 0 0 }
 .rc { padding:4px 0 }
 .ri {
   display:flex; align-items:center; padding:16px;
-  border-bottom:1px solid var(--l); transition:all .3s ease
+  border-bottom:1px solid var(--l); transition:all .3s ease;
+  opacity:0; transform:translateX(-20px)
 }
 .ri:last-child { border-bottom:none }
 .ri:hover { background:var(--h); transform:translateX(5px); border-radius:16px }
+.ri.ri-visible { animation:riIn .5s cubic-bezier(.22,1,.36,1) forwards }
+@keyframes riIn { to { opacity:1; transform:translateX(0) } }
 .av {
   width:60px; height:60px; border-radius:50%; flex-shrink:0;
   display:flex; align-items:center; justify-content:center;
@@ -150,7 +155,9 @@ li .B { font-size:13px; color:var(--c2); margin:4px 0 0 }
 .hi .X { font-size:36px; font-weight:700; color:var(--n2) }
 .hi .y { font-size:14px; color:var(--c2); margin:6px 0 0 }
 .hi .z { font-size:12px; color:var(--c3); margin:2px 0 0 }
-.ld { text-align:center; padding:80px 20px; color:var(--c3); font-size:16px }
+.ld { text-align:center; padding:80px 20px; color:var(--c3); font-size:16px; display:flex; flex-direction:column; align-items:center; gap:12px }
+.ld .spinner { width:28px; height:28px; border:3px solid var(--l); border-top-color:var(--n2); border-radius:50%; animation:spn .8s linear infinite }
+@keyframes spn { to { transform:rotate(360deg) } }
 .em { text-align:center; padding:80px 20px; color:var(--c3) }
 .sb .ld { padding:40px 20px }
 #md {
@@ -161,8 +168,10 @@ li .B { font-size:13px; color:var(--c2); margin:4px 0 0 }
 #md_in {
   background:var(--cb); backdrop-filter:blur(16px);
   border-radius:16px; padding:30px; max-width:400px; text-align:center;
-  box-shadow:0 8px 40px rgba(0,0,0,.3); border:1px solid var(--cb2)
+  box-shadow:0 8px 40px rgba(0,0,0,.3); border:1px solid var(--cb2);
+  opacity:0; transform:scale(.92); transition:all .25s cubic-bezier(.22,1,.36,1)
 }
+#md.md-show #md_in { opacity:1; transform:scale(1) }
 #md_msg { font-size:16px; font-weight:600; margin:0 0 20px; color:var(--n) }
 #md_btns { display:flex; gap:12px; justify-content:center }
 #md_btns button {
@@ -229,9 +238,19 @@ if (!B) {
   const MD_NO = document.getElementById('md_no');
   let MD_CB = null, GD = [], SEL = null;
 
-  MD_YES.onclick = function() { MD.style.display = 'none'; if (MD_CB) MD_CB(); };
-  MD_NO.onclick = function() { MD.style.display = 'none'; };
-  MD.onclick = function(e) { if (e.target === MD) MD.style.display = 'none'; };
+  function showModal(msg, cb) {
+    MD_MSG.textContent = msg;
+    MD_CB = cb;
+    MD.style.display = 'flex';
+    requestAnimationFrame(function() { MD.classList.add('md-show'); });
+  }
+  function hideModal() {
+    MD.classList.remove('md-show');
+    setTimeout(function() { MD.style.display = 'none'; }, 200);
+  }
+  MD_YES.onclick = function() { hideModal(); if (MD_CB) MD_CB(); };
+  MD_NO.onclick = hideModal;
+  MD.onclick = function(e) { if (e.target === MD) hideModal(); };
 
   function F(r) { return r && r.data ? r.data : r; }
 
@@ -314,17 +333,22 @@ if (!B) {
     }
     h += '</div></div>';
     CT.innerHTML = h;
+    // 触发排行逐条滑入
+    requestAnimationFrame(function() {
+      var ris = document.querySelectorAll('.c .ri');
+      ris.forEach(function(el, i) {
+        setTimeout(function() { el.classList.add('ri-visible'); }, 60 + i * 80);
+      });
+    });
     const db = document.getElementById('delBtn');
     if (db) {
       db.onclick = function() {
-        MD_MSG.textContent = '确定要删除此群组的所有发言数据吗？此操作不可恢复！';
-        MD_CB = function() {
+        showModal('确定要删除此群组的所有发言数据吗？此操作不可恢复！', function() {
           B.apiGet('delete', { group_id: SEL }).then(function() {
             GD = GD.filter(function(x) { return x.group_id !== SEL; });
             SEL = null; renderSidebar(); renderDetail();
           }).catch(function() {});
-        };
-        MD.style.display = 'flex';
+        });
       };
     }
   }
@@ -354,7 +378,9 @@ if (!B) {
 
   function enterGroup(id) {
     SEL = id; renderSidebar();
-    CT.innerHTML = '<div class="ld">加载中...</div>';
+    var oldC = document.querySelector('.ct .c');
+    if (oldC) oldC.classList.add('fade-out');
+    CT.innerHTML = '<div class="ld"><div class="spinner"></div>正在加载...</div>';
     B.apiGet('stats', { group_id: id }).then(function(r) {
       const d = F(r), ng = d && d.group ? d.group : null;
       if (!ng) { CT.innerHTML = '<div class="emp">暂无数据</div>'; return; }
@@ -367,6 +393,10 @@ if (!B) {
         });
       }
       renderDetail();
+      requestAnimationFrame(function() {
+        var nc = document.querySelector('.ct .c');
+        if (nc) nc.classList.add('fade-in');
+      });
     }).catch(function(e) {
       CT.innerHTML = '<div class="emp">加载失败</div>';
     });
