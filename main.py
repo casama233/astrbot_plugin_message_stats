@@ -63,7 +63,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.5")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.6")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -408,9 +408,24 @@ class MessageStatsPlugin(Star):
         try:
             group_id_str = str(group_id)
             
-            # 使用 PlatformHelper 统一获取群组名称（跨平台通用）
-            helper = PlatformHelper(event, self.context)
-            group_name = await helper.get_group_name(group_id)
+            group_name = None
+            
+            # 方式1: 优先通过 event.get_group() 获取（框架级，更稳定）
+            if event is not None:
+                try:
+                    group_data = await event.get_group(group_id)
+                    if group_data:
+                        group_name = getattr(group_data, 'group_name', None) or \
+                                     getattr(group_data, 'name', None) or \
+                                     getattr(group_data, 'title', None) or \
+                                     getattr(group_data, 'group_title', None)
+                except Exception:
+                    pass
+            
+            # 方式2: 通过 PlatformHelper API 获取（备用）
+            if not group_name:
+                helper = PlatformHelper(event, self.context)
+                group_name = await helper.get_group_name(group_id)
             
             # 如果获取到群名，更新所有缓存
             if group_name:
