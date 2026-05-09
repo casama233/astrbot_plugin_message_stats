@@ -63,7 +63,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.4")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.5")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
