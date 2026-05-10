@@ -63,7 +63,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.7")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.8")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -534,7 +534,7 @@ class MessageStatsPlugin(Star):
     
     # 排行榜数量限制常量（使用模块级常量）
     RANK_COUNT_MIN = 1
-    # MAX_RANK_COUNT 已从 constants 模块导入，不再重复定义
+    MAX_RANK_COUNT = 100  # 最大排行榜显示人数，来源: constants.MAX_RANK_COUNT
     
     # 图片模式别名常量
     IMAGE_MODE_ENABLE_ALIASES = {'1', 'true', '开', 'on', 'yes'}
