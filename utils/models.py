@@ -206,6 +206,8 @@ class UserData:
     llm_title: Optional[str] = None
     # LLM 生成的头衔颜色（持久化到文件），如 "#EF4444"
     llm_title_color: Optional[str] = None
+    # LLM 生成头衔时的用户发言数（持久化到文件），用于增量更新判断
+    llm_title_message_count: int = 0
     # display_title / display_title_color 为运行时属性，从 llm_title / llm_title_color 映射而来
     # 兼容旧代码逻辑，用于图片生成等场景
     display_title: Optional[str] = None
@@ -318,6 +320,9 @@ class UserData:
             result["llm_title"] = self.llm_title
         if self.llm_title_color:
             result["llm_title_color"] = self.llm_title_color
+        # 持久化头衔生成时的发言数（用于增量更新）
+        if self.llm_title_message_count > 0:
+            result["llm_title_message_count"] = self.llm_title_message_count
         return result
 
     
@@ -374,6 +379,9 @@ class UserData:
             user_data.llm_title = data["llm_title"]
         if "llm_title_color" in data:
             user_data.llm_title_color = data["llm_title_color"]
+        # 恢复头衔生成时的发言数（用于增量更新）
+        if "llm_title_message_count" in data:
+            user_data.llm_title_message_count = data["llm_title_message_count"]
         
         return user_data
 
