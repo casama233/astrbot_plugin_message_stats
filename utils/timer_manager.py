@@ -164,7 +164,6 @@ class TimerManager:
     # 最新的 generation 时自动退出，防止重装后旧实例继续发送
     # 锁文件永不累积（始终只有1个文件，被最新实例不断覆写）
     _lock_file_base: Optional[str] = None
-    _generation_id: int = 0
     
     
     def __init__(self, data_manager: DataManager, image_generator: ImageGenerator, context=None, group_unified_msg_origins: Dict[str, str] = None):
@@ -195,9 +194,9 @@ class TimerManager:
             TimerManager._lock_file_base = str(data_manager.data_dir)
         
         # 分配唯一的 generation ID（递增，最新的拥有执行权）
-        TimerManager._generation_id += 1
-        self._generation = TimerManager._generation_id
-        self.logger.info(f"定时任务管理器 Generation #{self._generation} 已创建")
+        import uuid
+        self._generation = uuid.uuid4().hex
+        self.logger.info(f"定时任务管理器 Generation {self._generation} 已创建")
         
         # 写入文件锁，标记当前为最新 generation
         self._write_lock_file()
@@ -252,8 +251,7 @@ class TimerManager:
             if not lock_path.exists():
                 return True
             content = lock_path.read_text(encoding='utf-8').strip()
-            latest = int(content)
-            return self._generation >= latest
+            return content.strip() == self._generation
         except (ValueError, OSError, IOError):
             return True
 
@@ -441,7 +439,7 @@ class TimerManager:
         """
         # 更新文件锁，标记当前为最新 generation
         self._write_lock_file()
-        self.logger.info(f"定时任务循环 Generation #{self._generation} 已启动")
+        self.logger.info(f"定时任务循环 Generation {self._generation} 已启动")
         
         try:
             while not self._stop_event.is_set():
@@ -470,36 +468,36 @@ class TimerManager:
                     self.next_push_time = next_time
                     
                     try:
-                        self.logger.info(f"Generation #{self._generation} 开始执行定时推送任务")
+                        self.logger.info(f"Generation {self._generation} 开始执行定时推送任务")
                         success = await self._execute_push_task(config)
                         if success:
-                            self.logger.info(f"✅ Generation #{self._generation} 定时推送任务执行成功")
+                            self.logger.info(f"✅ Generation {self._generation} 定时推送任务执行成功")
                         else:
-                            self.logger.error(f"❌ Generation #{self._generation} 定时推送任务执行失败")
+                            self.logger.error(f"❌ Generation {self._generation} 定时推送任务执行失败")
                         self.logger.info(f"下次推送时间: {self.next_push_time}")
                     except Exception as e:
-                        self.logger.error(f"Generation #{self._generation} 定时推送异常: {e}")
+                        self.logger.error(f"Generation {self._generation} 定时推送异常: {e}")
                 
                 await asyncio.sleep(60)
                 
         except asyncio.CancelledError:
-            self.logger.info(f"Generation #{self._generation} 定时任务被取消")
+            self.logger.info(f"Generation {self._generation} 定时任务被取消")
             pass
         except (OSError, IOError, RuntimeError, ValueError) as e:
-            self.logger.error(f"Generation #{self._generation} 定时任务循环异常: {e}")
+            self.logger.error(f"Generation {self._generation} 定时任务循环异常: {e}")
             self.status = TimerTaskStatus.ERROR
             retry_count = getattr(self, '_timer_retry_count', 0)
             if retry_count >= 3:
-                self.logger.critical(f"Generation #{self._generation} 定时任务已重试 {retry_count} 次仍失败，停止重试")
+                self.logger.critical(f"Generation {self._generation} 定时任务已重试 {retry_count} 次仍失败，停止重试")
                 return
             self._timer_retry_count = retry_count + 1
-            self.logger.info(f"Generation #{self._generation} 将在5分钟后重试 (第{self._timer_retry_count}次)")
+            self.logger.info(f"Generation {self._generation} 将在5分钟后重试 (第{self._timer_retry_count}次)")
             await asyncio.sleep(300)
             if not self._stop_event.is_set():
-                self.logger.info(f"Generation #{self._generation} 尝试重启定时任务")
+                self.logger.info(f"Generation {self._generation} 尝试重启定时任务")
                 self.timer_task = asyncio.create_task(self._timer_loop(config))
         except Exception as e:
-            self.logger.error(f"Generation #{self._generation} 定时任务未知异常: {type(e).__name__}: {e}")
+            self.logger.error(f"Generation {self._generation} 定时任务未知异常: {type(e).__name__}: {e}")
             self.status = TimerTaskStatus.ERROR
     
     @safe_timer_operation(default_return=False)
@@ -711,12 +709,35 @@ class TimerManager:
                     max_retries=max_retries
                 )
                 
-                # 筛选出还没有持久化头衔的用户，已有头衔的用户跳过LLM分析
-                users_need_llm = [u for u in group_data if u.message_count > 0 and not u.llm_title]
-                users_with_title = [u for u in group_data if u.llm_title]
-                
+                # 修复：llm_title 可能存为空字符串 ""（旧数据污染），统一视为无头衔处理
+                # 无头衔用户也需要满足 min_daily_messages 才触发 LLM
+                users_need_llm = []
+                users_with_title = []
+                min_daily_msgs = getattr(config, 'llm_min_daily_messages', 0)
+                for u in group_data:
+                    if u.message_count <= 0:
+                        continue
+                    # 判断是否有有效头衔（兼容空字符串脏数据）
+                    has_title = bool(u.llm_title and u.llm_title.strip())
+                    
+                    if not has_title:
+                        # 无头衔用户：必须满足 min_daily 才触发 LLM
+                        if min_daily_msgs > 0 and u.message_count < min_daily_msgs:
+                            users_with_title.append(u)
+                            continue
+                        users_need_llm.append(u)
+                    elif u.llm_title_message_count == 0:
+                        if min_daily_msgs > 0 and u.message_count >= min_daily_msgs:
+                            users_need_llm.append(u)
+                        else:
+                            users_with_title.append(u)
+                    elif min_daily_msgs > 0 and (u.message_count - u.llm_title_message_count) >= min_daily_msgs:
+                        users_need_llm.append(u)
+                    else:
+                        users_with_title.append(u)
+
                 if users_with_title:
-                    self.logger.info(f"跳过 {len(users_with_title)} 个已有持久化头衔的用户，保留现有头衔")
+                    self.logger.info(f"跳过 {len(users_with_title)} 个增量不足的用户，保留现有头衔")
                 
                 titles = None
                 token_usage = None
@@ -751,6 +772,7 @@ class TimerManager:
                                 user.display_title_color = title_color
                                 user.llm_title = title_text
                                 user.llm_title_color = title_color
+                                user.llm_title_message_count = user.message_count
                             else:
                                 title_text = info
                                 user.display_title = title_text
