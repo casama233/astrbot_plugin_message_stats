@@ -63,7 +63,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.6")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.7")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -124,6 +124,13 @@ class MessageStatsPlugin(Star):
             ["GET"],
             "删除群组发言数据",
         )
+        context.register_web_api(
+            "/astrbot_plugin_message_stats/chart",
+            self.page_chart,
+            ["GET"],
+            "群组发言趋势图表数据",
+        )
+
         self.logger = astrbot_logger
         
         # 使用StarTools获取插件数据目录
@@ -228,19 +235,53 @@ class MessageStatsPlugin(Star):
     async def page_stats(self):
         try:
             from quart import request
+            from datetime import date, timedelta
             import os
             gid = request.args.get('group_id') if request else None
+            rank_type = request.args.get('rank_type', 'total') if request else 'total'
             if gid:
                 users = await self.data_manager.get_group_data(gid)
                 if not users:
                     return self._jsonify({"status":"ok","data":{"group":None}})
                 act = [u for u in users if u.message_count>0]
-                act.sort(key=lambda x:x.message_count,reverse=True)
-                tm = sum(u.message_count for u in act)
-                tu = []
-                for u in act[:self.plugin_config.rand]:
-                    pct = (u.message_count/tm*100) if tm>0 else 0
-                    tu.append({"nickname":u.nickname,"message_count":u.message_count,"title":u.llm_title or u.display_title or "","title_color":u.llm_title_color or u.display_title_color or "","last_date":u.last_date or "","percentage":round(pct,1)})
+                # 根据 rank_type 计算时间段内数据
+                today = date.today()
+                if rank_type == 'daily':
+                    start, end = today, today
+                elif rank_type == 'week':
+                    days_since_monday = today.weekday()
+                    start = today - timedelta(days=days_since_monday)
+                    end = today
+                elif rank_type == 'month':
+                    start = today.replace(day=1)
+                    end = today
+                elif rank_type == 'year':
+                    start = today.replace(month=1, day=1)
+                    end = today
+                else:
+                    start, end = None, None
+                
+                if start is not None:
+                    # 按时段排序
+                    act_with_period = []
+                    for u in act:
+                        pc = u.get_message_count_in_period(start, end)
+                        if pc > 0:
+                            act_with_period.append((u, pc))
+                    act_with_period.sort(key=lambda x: x[1], reverse=True)
+                    tm = sum(c for _, c in act_with_period)
+                    tu = []
+                    for u, pc in act_with_period[:self.plugin_config.rand]:
+                        pct = (pc/tm*100) if tm>0 else 0
+                        tu.append({"nickname":u.nickname,"message_count":pc,"title":u.llm_title or u.display_title or "","title_color":u.llm_title_color or u.display_title_color or "","last_date":u.last_date or "","percentage":round(pct,1)})
+                else:
+                    act.sort(key=lambda x:x.message_count,reverse=True)
+                    tm = sum(u.message_count for u in act)
+                    tu = []
+                    for u in act[:self.plugin_config.rand]:
+                        pct = (u.message_count/tm*100) if tm>0 else 0
+                        tu.append({"nickname":u.nickname,"message_count":u.message_count,"title":u.llm_title or u.display_title or "","title_color":u.llm_title_color or u.display_title_color or "","last_date":u.last_date or "","percentage":round(pct,1)})
+
                 fp2 = self.data_manager.groups_dir / f"{gid}.json"
                 fs2 = ""
                 if fp2.exists():
@@ -261,8 +302,12 @@ class MessageStatsPlugin(Star):
                     s = os.path.getsize(str(fp))
                     fs = f"{s/1024:.1f}KB" if s<1024*1024 else f"{s/1024/1024:.1f}MB"
                 gn = self._web_group_name_cache.get(str(g2), f"群{g2}")
-                gd.append({"group_id":g2,"group_name":gn,"display_name":f"{gn} - {g2}","file_size":fs,"total_messages":sum(u.message_count for u in ac),"user_count":len(ac)})
+                tm = sum(u.message_count for u in ac)
+                gd.append({"group_id":g2,"group_name":gn,"display_name":f"{gn} - {g2}","file_size":fs,"total_messages":tm,"user_count":len(ac)})
+            # 按总发言数降序排序
+            gd.sort(key=lambda x: x["total_messages"], reverse=True)
             ts = None
+
             if self.timer_manager:
                 s = await self.timer_manager.get_status()
                 ts = {"running":s["status"]=="running","next_push":str(s.get("next_push_time","") or "")}
@@ -283,6 +328,39 @@ class MessageStatsPlugin(Star):
                 self.logger.info(f"Web面板删除群组数据: {gid}")
                 return self._jsonify({"status":"ok","message":"已删除"})
             return self._jsonify({"status":"error","message":"删除失败"})
+        except Exception as e:
+            return self._jsonify({"status":"error","message":str(e)})
+    
+    async def page_chart(self):
+        """Web API: 获取群组近7天发言趋势"""
+        try:
+            from quart import request
+            from datetime import date, timedelta
+            gid = request.args.get('group_id') if request else None
+            if not gid:
+                return self._jsonify({"status":"ok","data":{"days":[],"counts":[]}})
+            
+            users = await self.data_manager.get_group_data(gid)
+            if not users:
+                return self._jsonify({"status":"ok","data":{"days":[],"counts":[]}})
+            
+            # 聚合所有用户每天的总发言数
+            daily_totals = {}
+            for u in users:
+                if hasattr(u, '_message_dates') and u._message_dates:
+                    for date_str, count in u._message_dates.items():
+                        daily_totals[date_str] = daily_totals.get(date_str, 0) + count
+            
+            # 取最近7天
+            today = date.today()
+            days, counts = [], []
+            for i in range(6, -1, -1):
+                d = today - timedelta(days=i)
+                ds = str(d)
+                days.append(f"{d.month}/{d.day}")
+                counts.append(daily_totals.get(ds, 0))
+            
+            return self._jsonify({"status":"ok","data":{"days":days,"counts":counts}})
         except Exception as e:
             return self._jsonify({"status":"error","message":str(e)})
 
@@ -1415,14 +1493,36 @@ class MessageStatsPlugin(Star):
                         
                         grp_name = group_info.group_name or f"群{group_id}"
                         
-                        # 只分析排行榜上实际显示的用户中还没有持久化头衔的用户
-                        # 已有持久化头衔的用户跳过LLM分析，保持头衔不变，避免每次都不一样
+                        # 修复：llm_title 可能存为空字符串 ""（旧数据污染），统一视为无头衔处理
+                        # 同时无头衔用户也需要满足 min_daily_messages 才触发 LLM，避免低发言用户频繁触发
                         ranked_users_for_llm = [user for user, _ in filtered_data[:config.rand]]
-                        users_need_llm = [u for u in ranked_users_for_llm if not u.llm_title]
-                        users_with_title = [u for u in ranked_users_for_llm if u.llm_title]
+                        users_need_llm = []
+                        users_with_title = []
+                        min_daily = getattr(config, 'llm_min_daily_messages', 0)
+                        for u in ranked_users_for_llm:
+                            # 判断是否有有效头衔（兼容空字符串脏数据）
+                            has_title = bool(u.llm_title and u.llm_title.strip())
+                            
+                            if not has_title:
+                                # 无头衔用户：必须满足 min_daily 才触发 LLM
+                                if min_daily > 0 and u.message_count < min_daily:
+                                    users_with_title.append(u)
+                                    continue
+                                users_need_llm.append(u)
+                            elif u.llm_title_message_count == 0:
+                                # 旧数据没有记录生成时的发言数，检查总发言数是否达标
+                                if min_daily > 0 and u.message_count >= min_daily:
+                                    users_need_llm.append(u)
+                                else:
+                                    users_with_title.append(u)
+                            elif min_daily > 0 and (u.message_count - u.llm_title_message_count) >= min_daily:
+                                # 增量达到阈值，重新生成
+                                users_need_llm.append(u)
+                            else:
+                                users_with_title.append(u)
                         
                         if users_with_title:
-                            self.logger.info(f"跳过 {len(users_with_title)} 个已有持久化头衔的用户，保留现有头衔")
+                            self.logger.info(f"跳过 {len(users_with_title)} 个增量不足的用户，保留现有头衔")
                         
                         titles = None
                         token_usage = None
@@ -1464,6 +1564,7 @@ class MessageStatsPlugin(Star):
                                     # 写入持久化字段
                                     user_data_item.llm_title = title_text
                                     user_data_item.llm_title_color = title_color if isinstance(info, dict) else None
+                                    user_data_item.llm_title_message_count = user_data_item.message_count
                                     titles_map[user_data_item.user_id] = {
                                         "title": user_data_item.llm_title,
                                         "color": user_data_item.llm_title_color or "#7C3AED"
