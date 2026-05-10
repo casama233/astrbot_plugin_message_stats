@@ -1,5 +1,12 @@
 # 更新日志
 
+## v1.9.8 (2026-05-10)
+
+### 🐛 Bug 修复
+
+- **修复 `#设置发言榜数量` 命令报错**：`MAX_RANK_COUNT` 类常量缺失导致 `self.MAX_RANK_COUNT` 触发 `AttributeError`，现已补全
+- **修复 WebUI 排行榜输出模式选项不可选**：`_conf_schema.json` 中 `if_send_pic` 使用了不支持的 `value`/`label` 对象格式且 `default` 类型不匹配，改用标准 `options` 数组格式
+
 ## v1.9.7 (2026-05-10)
 
 ### ✨ 新功能

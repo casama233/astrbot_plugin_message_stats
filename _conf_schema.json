@@ -49,17 +49,8 @@
     "type": "string",
     "description": "排行榜输出模式",
     "hint": "选择排行榜的展示方式，图片模式更美观但消耗更多资源",
-    "default": 1,
-    "options": [
-      {
-        "value": 0,
-        "label": "文字"
-      },
-      {
-        "value": 1,
-        "label": "图片"
-      }
-    ]
+    "default": "图片",
+    "options": ["文字", "图片"]
   },
   "timer_enabled": {
     "type": "bool",
