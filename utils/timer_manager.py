@@ -1,3 +1,4 @@
+import os
 """
 定时任务管理器 - 最终修复版本
 实现定时排行榜推送功能，采用正确的AstrBot主动消息API
@@ -102,7 +103,7 @@ class PushService:
             message_chain = MessageChain()
             
             # 如果有图片，添加到MessageChain
-            if image_path and await aiofiles.os.path.exists(image_path):
+            if image_path and os.path.exists(image_path):
                 message_chain = message_chain.file_image(image_path)
             
             # 如果有文字消息，添加到MessageChain
@@ -160,7 +161,7 @@ class TimerManager:
     """
     
     # 文件锁机制：使用磁盘文件记录当前最新的 generation ID
-    # 每个新实例写入自��的 generation，旧实例循环中检查发现自己不再是
+    # 每个新实例写入自的 generation，旧实例循环中检查发现自己不再是
     # 最新的 generation 时自动退出，防止重装后旧实例继续发送
     # 锁文件永不累积（始终只有1个文件，被最新实例不断覆写）
     _lock_file_base: Optional[str] = None
@@ -193,10 +194,10 @@ class TimerManager:
         if TimerManager._lock_file_base is None:
             TimerManager._lock_file_base = str(data_manager.data_dir)
         
-        # 分配唯一的 generation ID（递增，最新的拥有执行权）
+        # 分配唯一的 generation ID（使用 UUID 确保跨进程唯一）
         import uuid
         self._generation = uuid.uuid4().hex
-        self.logger.info(f"定时任务管理器 Generation {self._generation} 已创建")
+        self.logger.info(f"定时任务管理器 Generation #{self._generation} 已创建")
         
         # 写入文件锁，标记当前为最新 generation
         self._write_lock_file()
@@ -241,7 +242,7 @@ class TimerManager:
         """检查当前 generation 是否最新（读取文件锁）
         
         文件锁中存的是最新的 generation ID。
-        如果和本实例不一致（有更新实例写入更大 generation），
+        如果和本实例不一致（有更新实例写入新的 generation），
         说明本实例已过期，应自动退出。
         """
         lock_path = self._get_lock_file_path()
@@ -251,7 +252,7 @@ class TimerManager:
             if not lock_path.exists():
                 return True
             content = lock_path.read_text(encoding='utf-8').strip()
-            return content.strip() == self._generation
+            return self._generation == content
         except (ValueError, OSError, IOError):
             return True
 
@@ -613,7 +614,7 @@ class TimerManager:
         try:
             # 2. 从群名持久化缓存获取
             group_names_file = self.data_manager.data_dir / "group_names.json"
-            if await aiofiles.os.path.exists(group_names_file):
+            if os.path.exists(group_names_file):
                 async with aiofiles.open(group_names_file, 'r', encoding='utf-8') as f:
                     content = await f.read()
                     if content.strip():
@@ -626,7 +627,7 @@ class TimerManager:
             # 3. 从数据文件获取群组名称
             group_file_path = self.data_manager.groups_dir / f"{group_id}.json"
             
-            if await aiofiles.os.path.exists(group_file_path):
+            if os.path.exists(group_file_path):
                 async with aiofiles.open(group_file_path, 'r', encoding='utf-8') as f:
                     content = await f.read()
                     if content.strip():
@@ -847,8 +848,8 @@ class TimerManager:
             # 清理临时图片文件（确保无论push_to_group是否异常都执行）
             if image_path:
                 try:
-                    if await aiofiles.os.path.exists(image_path):
-                        await aiofiles.os.unlink(image_path)
+                    if os.path.exists(image_path):
+                        os.unlink(image_path)
                 except Exception as e:
                     self.logger.warning(f"清理临时图片文件失败: {image_path}, 错误: {e}")
         
@@ -1122,18 +1123,18 @@ class TimerManager:
         if rank_type == RankType.TOTAL:
             return "总发言排行榜"
         elif rank_type == RankType.DAILY:
-            return f"今日[{now.year}年{now.month}月{now.day}日]发言榜单"
+            return f"[{now.year}年{now.month}月{now.day}日]发言榜单"
         elif rank_type == RankType.WEEKLY:
             # 计算周数
             week_num = now.isocalendar().week
-            return f"本周[{now.year}年{now.month}月第{week_num}周]发言榜单"
+            return f"[{now.year}年{now.month}月第{week_num}周]发言榜单"
         elif rank_type == RankType.MONTHLY:
-            return f"本月[{now.year}年{now.month}月]发言榜单"
+            return f"[{now.year}年{now.month}月]发言榜单"
         elif rank_type == RankType.YEARLY:
-            return f"本年[{now.year}年]发言榜单"
+            return f"[{now.year}年]发言榜单"
         elif rank_type == RankType.LAST_YEAR:
             last_year = now.year - 1
-            return f"去年[{last_year}年]发言榜单"
+            return f"[{last_year}年]发言榜单"
         else:
             return "发言榜单"
     
