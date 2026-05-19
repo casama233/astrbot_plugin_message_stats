@@ -440,7 +440,7 @@ class TimerManager:
         """
         # 更新文件锁，标记当前为最新 generation
         self._write_lock_file()
-        self.logger.info(f"定时任务循环 Generation #{self._generation} 已启动")
+        self.logger.info(f"定时任务循环 Generation {self._generation} 已启动")
         
         try:
             while not self._stop_event.is_set():
@@ -469,36 +469,36 @@ class TimerManager:
                     self.next_push_time = next_time
                     
                     try:
-                        self.logger.info(f"Generation #{self._generation} 开始执行定时推送任务")
+                        self.logger.info(f"Generation {self._generation} 开始执行定时推送任务")
                         success = await self._execute_push_task(config)
                         if success:
-                            self.logger.info(f"✅ Generation #{self._generation} 定时推送任务执行成功")
+                            self.logger.info(f"✅ Generation {self._generation} 定时推送任务执行成功")
                         else:
-                            self.logger.error(f"❌ Generation #{self._generation} 定时推送任务执行失败")
+                            self.logger.error(f"❌ Generation {self._generation} 定时推送任务执行失败")
                         self.logger.info(f"下次推送时间: {self.next_push_time}")
                     except Exception as e:
-                        self.logger.error(f"Generation #{self._generation} 定时推送异常: {e}")
+                        self.logger.error(f"Generation {self._generation} 定时推送异常: {e}")
                 
                 await asyncio.sleep(60)
                 
         except asyncio.CancelledError:
-            self.logger.info(f"Generation #{self._generation} 定时任务被取消")
+            self.logger.info(f"Generation {self._generation} 定时任务被取消")
             pass
         except (OSError, IOError, RuntimeError, ValueError) as e:
-            self.logger.error(f"Generation #{self._generation} 定时任务循环异常: {e}")
+            self.logger.error(f"Generation {self._generation} 定时任务循环异常: {e}")
             self.status = TimerTaskStatus.ERROR
             retry_count = getattr(self, '_timer_retry_count', 0)
             if retry_count >= 3:
-                self.logger.critical(f"Generation #{self._generation} 定时任务已重试 {retry_count} 次仍失败，停止重试")
+                self.logger.critical(f"Generation {self._generation} 定时任务已重试 {retry_count} 次仍失败，停止重试")
                 return
             self._timer_retry_count = retry_count + 1
-            self.logger.info(f"Generation #{self._generation} 将在5分钟后重试 (第{self._timer_retry_count}次)")
+            self.logger.info(f"Generation {self._generation} 将在5分钟后重试 (第{self._timer_retry_count}次)")
             await asyncio.sleep(300)
             if not self._stop_event.is_set():
-                self.logger.info(f"Generation #{self._generation} 尝试重启定时任务")
+                self.logger.info(f"Generation {self._generation} 尝试重启定时任务")
                 self.timer_task = asyncio.create_task(self._timer_loop(config))
         except Exception as e:
-            self.logger.error(f"Generation #{self._generation} 定时任务未知异常: {type(e).__name__}: {e}")
+            self.logger.error(f"Generation {self._generation} 定时任务未知异常: {type(e).__name__}: {e}")
             self.status = TimerTaskStatus.ERROR
     
     @safe_timer_operation(default_return=False)
@@ -710,26 +710,41 @@ class TimerManager:
                     max_retries=max_retries
                 )
                 
-                # 获取群组名称用于提示词
-                grp_name = await self._get_group_name(group_id)
-                titles, token_usage = await llm_analyzer.analyze_users(
-                    group_data, grp_name, min_daily_messages=min_daily
-                )
-                
-                if token_usage and token_usage.get("total_tokens", 0) > 0:
-                    token_usage_info = token_usage
-                
-                # 筛选出还没有持久化头衔的用户，已有头衔的用户跳过LLM分析
-                users_need_llm = [u for u in group_data if u.message_count > 0 and not u.llm_title]
-                users_with_title = [u for u in group_data if u.llm_title]
-                
+                # 修复：llm_title 可能存为空字符串 ""（旧数据污染），统一视为无头衔处理
+                # 无头衔用户也需要满足 min_daily_messages 才触发 LLM
+                users_need_llm = []
+                users_with_title = []
+                min_daily_msgs = getattr(config, 'llm_min_daily_messages', 0)
+                for u in group_data:
+                    if u.message_count <= 0:
+                        continue
+                    # 判断是否有有效头衔（兼容空字符串脏数据）
+                    has_title = bool(u.llm_title and u.llm_title.strip())
+                    
+                    if not has_title:
+                        # 无头衔用户：必须满足 min_daily 才触发 LLM
+                        if min_daily_msgs > 0 and u.message_count < min_daily_msgs:
+                            users_with_title.append(u)
+                            continue
+                        users_need_llm.append(u)
+                    elif u.llm_title_message_count == 0:
+                        if min_daily_msgs > 0 and u.message_count >= min_daily_msgs:
+                            users_need_llm.append(u)
+                        else:
+                            users_with_title.append(u)
+                    elif min_daily_msgs > 0 and (u.message_count - u.llm_title_message_count) >= min_daily_msgs:
+                        users_need_llm.append(u)
+                    else:
+                        users_with_title.append(u)
+
                 if users_with_title:
-                    self.logger.info(f"跳过 {len(users_with_title)} 个已有持久化头衔的用户，保留现有头衔")
+                    self.logger.info(f"跳过 {len(users_with_title)} 个增量不足的用户，保留现有头衔")
                 
                 titles = None
                 token_usage = None
                 if users_need_llm:
                     self.logger.info(f"为 {len(users_need_llm)} 个无头衔用户调用LLM生成头衔")
+                    grp_name = await self._get_group_name(group_id)
                     titles, token_usage = await llm_analyzer.analyze_users(
                         users_need_llm, grp_name, min_daily_messages=min_daily
                     )
@@ -758,6 +773,7 @@ class TimerManager:
                                 user.display_title_color = title_color
                                 user.llm_title = title_text
                                 user.llm_title_color = title_color
+                                user.llm_title_message_count = user.message_count
                             else:
                                 title_text = info
                                 user.display_title = title_text
@@ -780,7 +796,7 @@ class TimerManager:
         
         # 根据排行榜类型筛选数据
         # 定时推送强制使用今日排行榜
-        rank_type = RankType.DAILY
+        rank_type = self._parse_rank_type(config.timer_rank_type)
         filtered_data = await self._filter_data_by_rank_type(group_data, rank_type)
         if not filtered_data:
 
@@ -1236,7 +1252,16 @@ class TimerManager:
                 # 推送到所有配置群组
                 success_count = 0
                 for target_group in config.timer_target_groups:
-                    if await self._push_to_group(target_group, config):
+                    group_id_str = str(target_group).strip()
+                    actual_group_id = group_id_str
+                    if ':' in group_id_str:
+                        try:
+                            extracted = group_id_str.rsplit(':', 1)[-1]
+                            if extracted.lstrip('-').isdigit():
+                                actual_group_id = extracted
+                        except (AttributeError, IndexError, ValueError):
+                            pass
+                    if await self._push_to_group(actual_group_id, config):
                         success_count += 1
                 
                 return success_count > 0
