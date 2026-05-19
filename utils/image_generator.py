@@ -242,15 +242,13 @@ class ImageGenerator:
         """根据当前时间自动选择合适的主题
         
         根据 auto_theme_switch 配置中的 light/dark 切换时间，
-        判断当前应该使用浅色主题还是深色主题。
-        浅色时段使用用户配置的主题（如 liquid_glass），
-        深色时段固定使用 liquid_glass_dark。
+        判断当前应该使用浅色主题还是深色主题，并自动映射到对应的主题版本。
         
         Args:
-            base_theme: 用户配置的浅色主题名称
+            base_theme: 用户配置的基础主题名称
             
         Returns:
-            str: 主题名称，浅色时段返回 base_theme，深色时段返回 'liquid_glass_dark'
+            str: 主题名称，根据当前时段自动映射到对应的浅色/深色版本
         """
         try:
             switch_times = getattr(self.config, 'theme_switch_times', {"light": "06:00", "dark": "18:00"})
@@ -267,15 +265,26 @@ class ImageGenerator:
             dark_h, dark_m = map(int, dark_time_str.split(':'))
             dark_minutes = dark_h * 60 + dark_m
             
+            # 深色→浅色 映射表（深色时段配置的主题在浅色时段自动映射）
+            light_theme_map = {
+                'premium_dark': 'premium_light',
+                'liquid_glass_dark': 'liquid_glass',
+            }
+            # 浅色→深色 映射表（浅色时段配置的主题在深色时段自动映射）
+            dark_theme_map = {
+                'liquid_glass': 'liquid_glass_dark',
+                'default': 'premium_dark',
+                'premium_light': 'premium_dark',
+                'bubble': 'premium_dark',
+            }
+            
             # 判断当前时间段
             if light_minutes <= current_minutes < dark_minutes:
-                # 浅色时间段：使用用户配置的浅色主题
-                return base_theme
+                # 浅色时间段：深色主题自动映射回浅色版本
+                return light_theme_map.get(base_theme, base_theme)
             else:
-                dark_map = {'liquid_glass': 'liquid_glass_dark', 'default': 'premium_dark', 'premium_light': 'premium_dark', 'bubble': 'premium_dark'}
-                if base_theme == 'bubble':
-                    return 'premium_dark'
-                return dark_map.get(base_theme, 'premium_dark')
+                # 深色时间段：浅色主题自动映射回深色版本
+                return dark_theme_map.get(base_theme, 'premium_dark')
         except (ValueError, AttributeError, KeyError, TypeError) as e:
             self.logger.warning(f"自动主题切换时间解析失败，使用默认主题: {e}")
             return base_theme
