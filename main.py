@@ -688,7 +688,8 @@ class MessageStatsPlugin(Star):
         """自动消息监听器 - 监听所有消息并记录群成员发言统计"""
         # 跳过命令消息
         message_str = getattr(event, 'message_str', '')
-        if not message_str or message_str.startswith(('%', '/')):
+        if message_str and message_str.startswith(('%', '/')):
+
             return
         
         # 获取基本信息
