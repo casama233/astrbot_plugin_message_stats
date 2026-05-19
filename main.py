@@ -63,7 +63,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "1.9.3")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.0.0")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -939,8 +939,8 @@ class MessageStatsPlugin(Star):
                 # 清理临时图片（确保无论send_message是否异常都执行）
                 if image_path:
                     try:
-                        if await aiofiles.os.path.exists(image_path):
-                            await aiofiles.os.unlink(image_path)
+                        if os.path.exists(image_path):
+                            os.unlink(image_path)
                     except Exception as e:
                         self.logger.warning(f"清理里程碑图片失败: {e}")
                     
@@ -1049,8 +1049,8 @@ class MessageStatsPlugin(Star):
                 # 清理临时图片文件（确保无论yield后续是否执行都清理）
                 if image_path:
                     try:
-                        if await aiofiles.os.path.exists(image_path):
-                            await aiofiles.os.unlink(image_path)
+                        if os.path.exists(image_path):
+                            os.unlink(image_path)
                     except Exception as e:
                         self.logger.warning(f"清理里程碑临时图片失败: {image_path}, 错误: {e}")
                     
@@ -1625,7 +1625,7 @@ class MessageStatsPlugin(Star):
 
             
             # 检查图片文件是否存在
-            if await aiofiles.os.path.exists(temp_path):
+            if os.path.exists(temp_path):
                 yield event.image_result(str(temp_path))
             else:
                 # 回退到文字模式
@@ -1654,9 +1654,9 @@ class MessageStatsPlugin(Star):
             yield event.plain_result(text_msg)
         finally:
             # 清理临时文件，避免资源泄漏
-            if temp_path and await aiofiles.os.path.exists(temp_path):
+            if temp_path and os.path.exists(temp_path):
                 try:
-                    await aiofiles.os.unlink(temp_path)
+                    os.unlink(temp_path)
                 except OSError as e:
                     self.logger.warning(f"清理临时图片文件失败: {temp_path}, 错误: {e}")
     
@@ -1816,18 +1816,18 @@ class MessageStatsPlugin(Star):
         if rank_type == RankType.TOTAL:
             return "总发言排行榜"
         elif rank_type == RankType.DAILY:
-            return f"今日[{now.year}年{now.month}月{now.day}日]发言榜单"
+            return f"[{now.year}年{now.month}月{now.day}日]发言榜单"
         elif rank_type == RankType.WEEKLY:
             # 计算周数
             week_num = now.isocalendar().week
-            return f"本周[{now.year}年{now.month}月第{week_num}周]发言榜单"
+            return f"[{now.year}年{now.month}月第{week_num}周]发言榜单"
         elif rank_type == RankType.MONTHLY:
-            return f"本月[{now.year}年{now.month}月]发言榜单"
+            return f"[{now.year}年{now.month}月]发言榜单"
         elif rank_type == RankType.YEARLY:
-            return f"本年[{now.year}年]发言榜单"
+            return f"[{now.year}年]发言榜单"
         elif rank_type == RankType.LAST_YEAR:
             last_year = now.year - 1
-            return f"去年[{last_year}年]发言榜单"
+            return f"[{last_year}年]发言榜单"
         else:
             return "发言榜单"
     

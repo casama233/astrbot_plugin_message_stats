@@ -1,27 +1,43 @@
 # 更新日志
 
-## v2.0.0 (2026-05-19)
+## v2.0.0 (2026-05-20)
 
-### ✨ 新功能
+### 🐛 Bug 修复
+- **修复定时触发时多重发送问题**：将 `utils/timer_manager.py` 的文件锁机制修改为跨进程唯的 UUID，彻底解决了当插件存在多个实例时，锁失效导致发送重复图片（如同时发送浅色和暗色两张图片）的问题
+- **优化标题排版垂直居中**：修改 `rank_template_premium_light.html` 与 `rank_template_premium_dark.html` 模板，应用 Flexbox (`align-items: center; justify-content: center;`) 使得卡片头部的标题文字实现完美垂直居中
+- **去除多余的排行榜前缀标题**：移除了 `main.py` 和 `timer_manager.py` 生成标题时如“今日”、“本周”等前缀字样，消除与日期的重复
 
-- **全新 Premium 主题**：现代毛玻璃排名卡片，支持 light/dark 两种配色
-- **金银铜牌专属样式**：Top 3 阶梯式放大 + 渐变奖牌徽章
-- **独立渐变色进度条**：发言占比从左到右填充，视觉效果更直观
-- **日夜间自动切换**：`auto_theme_switch` 配置项支持根据时间自动切换 Premium 主题
-
-### 🎨 界面优化
-
-- **排行榜顶部卡片精简**：移除与日期重复的"今日/本周/本月/本年"字样，移除"成员"统计块，发言总数居中显示
+## v1.9.8 (2026-05-10)
 
 ### 🐛 Bug 修复
 
-- **模板引擎异常处理增强**：修复浏览器页面未完全关闭时生成的排行榜排名混乱
-- **数据兼容性修复**：v1.x 升级到 v2.x 时旧格式用户数据自动兼容
+- **修复 `#设置发言榜数量` 命令报错**：`MAX_RANK_COUNT` 类常量缺失导致 `self.MAX_RANK_COUNT` 触发 `AttributeError`，现已补全
+- **修复 WebUI 排行榜输出模式选项不可选**：`_conf_schema.json` 中 `if_send_pic` 使用了不支持的 `value`/`label` 对象格式且 `default` 类型不匹配，改用标准 `options` 数组格式
 
-### 🔧 重构
+## v1.9.7 (2026-05-10)
 
-- **模板系统重构**：废弃旧气泡模板（bubble），替换为全新的 Premium 模板
-- **配置项更新**：`theme` 选项 `bubble`/`bubble_dark` 更新为 `premium_light`/`premium_dark`
+### ✨ 新功能
+
+- **Web 面板全新 UI 升级**：发言统计面板新增 Dock 栏时段切换（总/日/周/月/年）、群组迷你折线图（近7天发言趋势）、群组按总发言数排序、切换动画优化
+
+### 🐛 Bug 修复
+
+- **LLM 头衔频繁触发**：`llm_title` 存为空字符串 `""` 时被 `not u.llm_title` 误判为无头衔，导致每次都重新生成。已修复：改用 `bool(u.llm_title and u.llm_title.strip())` 判断有效头衔
+- **`page_stats` API 群组列表顺序随机**：已修复：按总发言数降序排序
+
+## v1.9.4 (2026-05-09)
+
+
+### 🐛 Bug 修复
+
+- **定时/手动推送排行榜类型硬编码**：`_push_to_group()` 中硬编码 `RankType.DAILY`，导致用户在 WebUI 设置的 `timer_rank_type` 配置完全无效。已修复：改为读取 `config.timer_rank_type`，定时推送和手动推送均可使用用户配置的排行榜类型。
+- **`#手动推送发言榜` 群组ID格式解析错误**：当 `timer_target_groups` 中存储 `Amy:GroupMessage:1081839722` 格式时，`manual_push()` 直接传入 `_push_to_group()` 导致 `get_group_data()` 校验失败。已修复：统一添加 unified_msg_origin 格式的群组 ID 提取逻辑。
+- **LLM 头衔生成重复调用浪费 Tokens**：`_push_to_group()` 中先对全体用户调用 `llm_analyzer.analyze_users()` 后才筛选已有持久化头衔的用户，导致每次推送都浪费一次 LLM 调用。已修复：先筛选出无头衔用户，只对这部分用户调用 LLM。
+
+### 🧹 代码清理
+
+- **移除冗余 `pydantic` 依赖**：插件中未使用 pydantic，且 AstrBot 框架已自带，`requirements.txt` 中已移除。
+- **`metadata.yaml` 添加 `astrbot_version` 声明**：添加 `astrbot_version: ">=4.16"`，确保版本兼容性检查。
 
 ## v1.9.3 (2026-05-07)
 

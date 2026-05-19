@@ -856,6 +856,7 @@ class ImageGenerator:
         
         # 预计算统计数据 - 使用时间段内的发言数
         total_messages = sum(user.display_total if user.display_total is not None else user.message_count for user in users)
+        max_messages = max((user.display_total if user.display_total is not None else user.message_count) for user in users) if users else 1
         
         # 批量生成用户项目
         sizes, fonts, pos, area_w, area_h = _gen_bubble_layout(users)
@@ -903,6 +904,7 @@ class ImageGenerator:
                 'avatar_url': self._get_avatar_url(user.user_id, user.nickname, self._current_group_info),
                 'total': user_messages,
                 'percentage': (user_messages / total_messages * 100) if total_messages > 0 else 0,
+                'fill_ratio': (user_messages / max_messages * 100) if max_messages > 0 else 0,
                 'last_date': user.last_date or "未知",
                 'is_current_user': is_current_user,
                 'is_separator': False,

@@ -86,7 +86,7 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `theme` | string | `premium_light` | 排行榜主题风格：`premium_light`（Premium 浅色）、`premium_dark`（Premium 暗色） |
+| `theme` | string | `default` | 排行榜主题风格：`default`（经典浅色）、`liquid_glass`（液态玻璃）、`liquid_glass_dark`（液态玻璃暗色） |
 | `auto_theme_switch` | bool | `false` | 是否根据时间自动切换主题（浅色/深色），启用后会覆盖手动设置的 theme |
 | `theme_switch_light_time` | string | `06:00` | 浅色主题开始时间，格式 HH:MM |
 | `theme_switch_dark_time` | string | `18:00` | 深色主题开始时间，格式 HH:MM |
@@ -131,10 +131,8 @@ astrbot_plugin_message_stats/
 │   └── cmd_config.json   # 命令配置
 ├── templates/            # 模板目录
 │   ├── __init__.py
-│   ├── rank_template_premium_light.html # Premium 浅色主题排行榜模板
-│   ├── rank_template_premium_dark.html  # Premium 暗色主题排行榜模板
-│   ├── rank_template.html               # 排行榜模板（default主题）
-│   ├── rank_template_liquid_glass.html  # 液态玻璃主题模板
+│   ├── rank_template.html # 排行榜模板（default主题）
+│   ├── rank_template_liquid_glass.html # 液态玻璃主题模板
 │   └── rank_template_liquid_glass_dark.html # 液态玻璃暗色主题模板
 └── utils/                # 工具模块
     ├── __init__.py
@@ -159,12 +157,11 @@ astrbot_plugin_message_stats/
 
 ## 📝 更新日志
 
-### v2.0.0 (2026-05-19)
-- ✅ 全新 Premium 主题（现代毛玻璃排名卡片）
-- ✅ Top 3 金银铜牌专属样式
-- ✅ 排行榜顶部卡片精简优化
-- ✅ 日夜间自动切换主题
-- ✅ 模板系统重构：气泡模板 → Premium 模板
+### v1.9.1 (2026-05-07)
+- ✅ 跨平台真实头像获取
+- ✅ i18n 国际化文件全面优化
+- ✅ 新增 tg_bot_token/dc_bot_token 配置
+- ✅ LLM 头衔持久化
 
 ### v1.9.0 (2026-05-05)
 - ✅ 新增插件Pages页面
@@ -210,7 +207,7 @@ astrbot_plugin_message_stats/
 
 ## 👨‍💻 作者
 
-**xiaoruange39 & AMYdd00**
+**xiaoruange39**
 - GitHub: [@xiaoruange39](https://github.com/xiaoruange39)
 - 插件开发：AstrBot生态贡献者
 - QQ群：[QQ群](https://qm.qq.com/q/8kdJ2Bzf6S)
