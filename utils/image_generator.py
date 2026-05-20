@@ -71,6 +71,79 @@ class ImageGenerationError(Exception):
     pass
 
 
+_AVATAR_COLORS = ['#F59E0B','#3B82F6','#8B5CF6','#EC4899','#10B981','#EF4444','#14B8A6','#F97316','#6366F1','#84CC16','#06B6D4','#D946EF','#0EA5E9','#EAB308','#A855F7']
+
+def _gen_bubble_layout(users):
+    import math, random; n = len(users)
+    if n == 0: return [], [], [], 800, 800
+    max_msg = max(u.display_total if u.display_total is not None else u.message_count for u in users)
+    if max_msg == 0: max_msg = 1
+    sqrt_max = max(1, math.sqrt(max_msg))
+    sizes = [max(80, min(250, 80 + ((u.display_total if u.display_total is not None else u.message_count) / max_msg) ** 0.4 * 170)) for u in users]
+    fonts = [max(14, min(28, 14 + (s-80)/170 * 14)) for s in sizes]
+    placed, raw_pos = [], []
+    def overlaps(x, y, r):
+        for px, py, pr in placed:
+            dx, dy = x - px, y - py
+            if dx*dx + dy*dy < (r + pr + 8)**2: return True
+        return False
+    random.seed(42)
+    jitter = lambda: (random.random() - 0.5) * 5.0
+    for i in range(n):
+        r = sizes[i]/2
+        if i == 0: bx, by = 0, 0
+        else:
+            ta = math.atan2(-placed[0][1], -placed[0][0]) + i * 2.39996; found = False
+            for st in range(1, 1000):
+                sr = r + sizes[0]/2 + st * 4.0
+                for ao in range(24):
+                    a = ta + ao * math.pi / 12
+                    tx, ty = math.cos(a) * sr + jitter(), math.sin(a) * sr + jitter()
+                    if not overlaps(tx, ty, r): bx, by = tx, ty; found = True; break
+                if found: break
+            if not found: bx, by = 0, 0
+        raw_pos.append((bx, by)); placed.append((bx, by, r))
+    
+    if n == 1:
+        min_x = -sizes[0]/2
+        max_x = sizes[0]/2
+        min_y = -sizes[0]/2
+        max_y = sizes[0]/2
+    else:
+        min_x = min(p[0]-sizes[i]/2 for i,p in enumerate(raw_pos))
+        max_x = max(p[0]+sizes[i]/2 for i,p in enumerate(raw_pos))
+        min_y = min(p[1]-sizes[i]/2 for i,p in enumerate(raw_pos))
+        max_y = max(p[1]+sizes[i]/2 for i,p in enumerate(raw_pos))
+        
+    margin = 20
+    cw = 800
+    ch = 800
+    sx = (cw - margin*2) / max(1, max_x - min_x)
+    sy = (ch - margin*2) / max(1, max_y - min_y)
+    scale = min(1.0, min(sx, sy))
+    
+    ox = (cw - (max_x - min_x) * scale) / 2 - min_x * scale + margin
+    oy = (ch - (max_y - min_y) * scale) / 2 - min_y * scale + margin
+    
+    fs2, ff2, fp2 = [], [], []
+    final_max_y = 0
+    
+    for i in range(n):
+        fx = raw_pos[i][0] * scale + ox
+        fy = raw_pos[i][1] * scale + oy
+        fs = max(60, sizes[i] * scale); ff = max(10, fonts[i] * scale)
+        fs2.append(int(fs)); ff2.append(int(ff)); fp2.append((int(fx - fs/2), int(fy - fs/2)))
+        
+        bottom = fy + fs/2
+        if bottom > final_max_y: final_max_y = bottom
+
+    area_h = 800
+    if n > 0 and final_max_y + margin > 800:
+        area_h = final_max_y + margin
+
+    return fs2, ff2, fp2, 800, int(area_h)
+
+
 class ImageGenerator:
     """图片生成器
     
@@ -153,9 +226,13 @@ class ImageGenerator:
             self.logger.info(f"自动主题切换已启用，当前时间匹配主题: {theme}")
         
         template_map = {
-            'default': 'rank_template.html',
+            'default': 'rank_template_premium_light.html',
+            'premium_light': 'rank_template_premium_light.html',
+            'premium_dark': 'rank_template_premium_dark.html',
             'liquid_glass': 'rank_template_liquid_glass.html',
             'liquid_glass_dark': 'rank_template_liquid_glass_dark.html',
+            'bubble': 'rank_template_premium_light.html',
+            'bubble_dark': 'rank_template_premium_dark.html',
         }
         template_file = template_map.get(theme, 'rank_template.html')
         self.template_path = self._templates_dir / template_file
@@ -165,15 +242,13 @@ class ImageGenerator:
         """根据当前时间自动选择合适的主题
         
         根据 auto_theme_switch 配置中的 light/dark 切换时间，
-        判断当前应该使用浅色主题还是深色主题。
-        浅色时段使用用户配置的主题（如 liquid_glass），
-        深色时段固定使用 liquid_glass_dark。
+        判断当前应该使用浅色主题还是深色主题，并自动映射到对应的主题版本。
         
         Args:
-            base_theme: 用户配置的浅色主题名称
+            base_theme: 用户配置的基础主题名称
             
         Returns:
-            str: 主题名称，浅色时段返回 base_theme，深色时段返回 'liquid_glass_dark'
+            str: 主题名称，根据当前时段自动映射到对应的浅色/深色版本
         """
         try:
             switch_times = getattr(self.config, 'theme_switch_times', {"light": "06:00", "dark": "18:00"})
@@ -190,13 +265,26 @@ class ImageGenerator:
             dark_h, dark_m = map(int, dark_time_str.split(':'))
             dark_minutes = dark_h * 60 + dark_m
             
+            # 深色→浅色 映射表（深色时段配置的主题在浅色时段自动映射）
+            light_theme_map = {
+                'premium_dark': 'premium_light',
+                'liquid_glass_dark': 'liquid_glass',
+            }
+            # 浅色→深色 映射表（浅色时段配置的主题在深色时段自动映射）
+            dark_theme_map = {
+                'liquid_glass': 'liquid_glass_dark',
+                'default': 'premium_dark',
+                'premium_light': 'premium_dark',
+                'bubble': 'premium_dark',
+            }
+            
             # 判断当前时间段
             if light_minutes <= current_minutes < dark_minutes:
-                # 浅色时间段：使用用户配置的浅色主题
-                return base_theme
+                # 浅色时间段：深色主题自动映射回浅色版本
+                return light_theme_map.get(base_theme, base_theme)
             else:
-                # 深色时间段：使用液态玻璃深色主题
-                return 'liquid_glass_dark'
+                # 深色时间段：浅色主题自动映射回深色版本
+                return dark_theme_map.get(base_theme, 'premium_dark')
         except (ValueError, AttributeError, KeyError, TypeError) as e:
             self.logger.warning(f"自动主题切换时间解析失败，使用默认主题: {e}")
             return base_theme
@@ -241,7 +329,7 @@ class ImageGenerator:
     async def _preload_templates(self):
         """预加载模板文件到缓存"""
         try:
-            if await aiofiles.os.path.exists(self.template_path):
+            if os.path.exists(self.template_path):
                 # 使用异步文件读取优化
                 async with aiofiles.open(self.template_path, 'r', encoding='utf-8') as f:
                     template_content = await f.read()
@@ -397,27 +485,37 @@ class ImageGenerator:
     
     async def _close_browser(self):
         """任务完成，减少任务计数，如果计数为0则关闭浏览器释放内存"""
-        async with self._browser_lock:
-            self._active_tasks = max(0, self._active_tasks - 1)
-            
-            if self._active_tasks > 0:
-                # 还有其他任务在使用浏览器，不关闭
-                return
+        # 防止取消异常打断清理流程导致任务数泄漏
+        import asyncio
+        try:
+            async with self._browser_lock:
+                self._active_tasks = max(0, self._active_tasks - 1)
                 
-            try:
-                # 不再在此处关闭self.page，因为页面已变为局部变量，由各自的任务自行关闭
-                if self.browser:
-                    await self.browser.close()
+                if self._active_tasks > 0:
+                    # 还有其他任务在使用浏览器，不关闭
+                    return
+                    
+                try:
+                    # 不再在此处关闭self.page，因为页面已变为局部变量，由各自的任务自行关闭
+                    if self.browser:
+                        await self.browser.close()
+                        self.browser = None
+                    if self.playwright:
+                        await self.playwright.stop()
+                        self.playwright = None
+                    self.logger.info("所有渲染任务完成，浏览器已关闭并释放内存")
+                except Exception as e:
+                    self.logger.warning(f"关闭浏览器时发生错误: {e}")
+                finally:
                     self.browser = None
-                if self.playwright:
-                    await self.playwright.stop()
                     self.playwright = None
-                self.logger.info("所有渲染任务完成，浏览器已关闭并释放内存")
-            except Exception as e:
-                self.logger.warning(f"关闭浏览器时发生错误: {e}")
-            finally:
+        except asyncio.CancelledError:
+            # 如果清理过程被取消，我们至少要把任务计数减一，以防止死锁和内存泄漏
+            self._active_tasks = max(0, self._active_tasks - 1)
+            if self._active_tasks == 0:
                 self.browser = None
                 self.playwright = None
+            raise
     
     async def cleanup(self):
         """清理资源
@@ -500,15 +598,22 @@ class ImageGenerator:
             # 生成HTML内容（显式传入头衔映射）
             html_content = await self._generate_html(users, group_info, title, current_user_id, llm_token_usage, titles_map)
             
+            # 动态获取内容实际所需的宽度，如果没生成则默认1200
+            dynamic_w = self.width
+            if "area_w" in html_content: # 这只是个保守预设，下面直接用 JS 测
+                pass
+                
             # 设置页面内容（使用 load 而非 networkidle，避免外部资源加载超时）
             await page.set_content(html_content, wait_until="load")
             
             # 等待页面加载完成
             await page.wait_for_timeout(2000)
             
-            # 动态调整页面高度
+            # 动态调整页面高度和宽度，确保边距一致
             body_height = await page.evaluate("document.body.scrollHeight")
-            await page.set_viewport_size({"width": self.width, "height": body_height})
+            # 通过获取 container 的宽度加上两侧 padding 来确定精确的截图宽度
+            body_width = await page.evaluate("document.querySelector('.container') ? document.querySelector('.container').offsetWidth + 100 : document.body.scrollWidth")
+            await page.set_viewport_size({"width": body_width, "height": body_height})
             
             # 生成临时文件路径（异步方式）
             temp_filename = f"rank_image_{uuid.uuid4().hex}.png"
@@ -550,7 +655,7 @@ class ImageGenerator:
             # 清理临时文件：如果生成失败，删除已创建的临时文件避免积累
             if not success and temp_path and temp_path.exists():
                 try:
-                    await aiofiles.os.unlink(str(temp_path))
+                    os.unlink(str(temp_path))
                     self.logger.debug(f"已清理失败的临时文件: {temp_path}")
                 except Exception as e:
                     self.logger.warning(f"清理临时文件失败: {e}")
@@ -601,7 +706,7 @@ class ImageGenerator:
             # 加载里程碑模板
             milestone_template_path = self._templates_dir / "milestone_template.html"
             template_content = ""
-            if await aiofiles.os.path.exists(milestone_template_path):
+            if os.path.exists(milestone_template_path):
                 async with aiofiles.open(milestone_template_path, 'r', encoding='utf-8') as f:
                     template_content = await f.read()
             else:
@@ -684,7 +789,7 @@ class ImageGenerator:
             # 清理临时文件：如果生成失败，删除已创建的临时文件避免积累
             if not success and temp_path and temp_path.exists():
                 try:
-                    await aiofiles.os.unlink(str(temp_path))
+                    os.unlink(str(temp_path))
                     self.logger.debug(f"已清理失败的里程碑临时文件: {temp_path}")
                 except Exception as e:
                     self.logger.warning(f"清理里程碑临时文件失败: {e}")
@@ -760,8 +865,14 @@ class ImageGenerator:
         
         # 预计算统计数据 - 使用时间段内的发言数
         total_messages = sum(user.display_total if user.display_total is not None else user.message_count for user in users)
+        max_messages = max((user.display_total if user.display_total is not None else user.message_count) for user in users) if users else 1
         
         # 批量生成用户项目
+        sizes, fonts, pos, area_w, area_h = _gen_bubble_layout(users)
+        if len(sizes) < len(users):
+            sizes.extend([70] * (len(users) - len(sizes)))
+            fonts.extend([10] * (len(users) - len(fonts)))
+            pos.extend([(area_w/2, area_h/2)] * (len(users) - len(pos)))
         user_items = []
         current_user_found = False
         
@@ -791,6 +902,9 @@ class ImageGenerator:
             if user_title:
                 self.logger.info(f"头衔数据: {user.nickname} -> 「{user_title}」")
             
+            c = _AVATAR_COLORS[sum(ord(ch) for ch in str(user.user_id)) % 15]
+            idx = _AVATAR_COLORS.index(c) if c in _AVATAR_COLORS else sum(ord(ch) for ch in str(user.user_id)) % 15
+            g2 = _AVATAR_COLORS[(idx + 5) % 15]
             user_items.append({
                 'rank': i + 1,
                 'nickname': user.nickname,
@@ -799,10 +913,12 @@ class ImageGenerator:
                 'avatar_url': self._get_avatar_url(user.user_id, user.nickname, self._current_group_info),
                 'total': user_messages,
                 'percentage': (user_messages / total_messages * 100) if total_messages > 0 else 0,
+                'fill_ratio': (user_messages / max_messages * 100) if max_messages > 0 else 0,
                 'last_date': user.last_date or "未知",
                 'is_current_user': is_current_user,
                 'is_separator': False,
-                '_group_info': group_info
+                'bubble_size': sizes[i], 'bubble_font': fonts[i], 'pos_x': pos[i][0], 'pos_y': pos[i][1],
+                'card_grad1': c, 'card_grad2': g2, '_group_info': group_info
             })
         
         # 如果当前用户不在排行榜中，添加到末尾
@@ -825,7 +941,9 @@ class ImageGenerator:
         
         return {
             'total_messages': total_messages,
-            'user_items': user_items
+            'user_items': user_items,
+            'area_w': area_w,
+            'area_h': area_h
         }
 
     
@@ -1364,7 +1482,7 @@ class ImageGenerator:
                     return str(cached_template)
             
             # 缓存未命中，从文件加载
-            if await aiofiles.os.path.exists(self.template_path):
+            if os.path.exists(self.template_path):
                 async with aiofiles.open(self.template_path, 'r', encoding='utf-8') as f:
                     content = await f.read()
                 
@@ -1823,7 +1941,7 @@ class ImageGenerator:
             'jinja2_enabled': JINJA2_AVAILABLE and self.jinja_env is not None,
             'playwright_enabled': PLAYWRIGHT_AVAILABLE,
             'template_path': str(self.template_path),
-            'template_exists': await aiofiles.os.path.exists(self.template_path) if self.template_path else False
+            'template_exists': os.path.exists(self.template_path) if self.template_path else False
         }
     
     async def optimize_for_batch_generation(self):
@@ -1840,7 +1958,7 @@ class ImageGenerator:
         """加载用户条目宏模板（异步版本）"""
         try:
             macro_path = Path(__file__).parent.parent / "templates" / "user_item_macro.html"
-            if await aiofiles.os.path.exists(macro_path):
+            if os.path.exists(macro_path):
                 async with aiofiles.open(macro_path, 'r', encoding='utf-8') as f:
                     macro_content = await f.read()
                 

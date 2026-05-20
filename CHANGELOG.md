@@ -1,5 +1,17 @@
 # 更新日志
 
+## v2.0.0 (2026-05-20)
+
+### ✨ 新功能
+- **Premium 高级主题系列**：新增 `premium_light` / `premium_dark` 两款毛玻璃质感排行榜主题，支持七彩渐变标题、发光阴影、阶梯式前三名放大效果、发言占比填充条等高级视觉特性
+- **自动主题切换双向映射**：`_get_auto_theme()` 新增 `light_theme_map` 深→浅映射表，`premium_dark` / `liquid_glass_dark` 在浅色时段自动切回对应的浅色版本，实现与 `liquid_glass` 一致的双向对称切换
+- **Header 排版全面升级**：标题字号 32px → 40px，发言总数 36px → 44px，标签样式增强，Header 内边距和间距优化，垂直居中更完美
+
+### 🐛 Bug 修复
+- **修复表情包/语音/图片不计数**：`auto_message_listener` 使用 `if not message_str or ...` 判断导致非文本消息（`message_str` 为空）被直接跳过统计，改为 `if message_str and ...` 后只跳过命令消息，表情包/语音/图片等非文本消息正常计数
+- **修复定时触发时多重发送问题**：将 `utils/timer_manager.py` 的文件锁机制修改为跨进程唯的 UUID，彻底解决了当插件存在多个实例时，锁失效导致发送重复图片的问题
+- **去除多余的排行榜前缀标题**：移除了 `main.py` 和 `timer_manager.py` 生成标题时如"今日"、"本周"等前缀字样，消除与日期的重复
+
 ## v1.9.8 (2026-05-10)
 
 ### 🐛 Bug 修复

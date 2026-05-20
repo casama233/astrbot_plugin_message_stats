@@ -25,7 +25,9 @@
     "options": [
       "default",
       "liquid_glass",
-      "liquid_glass_dark"
+      "liquid_glass_dark",
+      "premium_light",
+      "premium_dark"
     ]
   },
   "detailed_logging_enabled": {
