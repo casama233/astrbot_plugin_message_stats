@@ -91,14 +91,10 @@ class PushService:
                 self.logger.error(f"❌ 群组 {group_id} 推送失败: context 未初始化")
                 return False
             
-            # 获取群组的unified_msg_origin
-            unified_msg_origin = self.group_unified_msg_origins.get(str(group_id))
-            if not unified_msg_origin:
-                self.logger.error(f"❌ 群组 {group_id} 推送失败: 缺少 unified_msg_origin")
-                self.logger.info("💡 解决方案: 在该群组中发送任意消息以收集 unified_msg_origin")
-                self.logger.info("📋 提示: 收集后再次尝试推送")
-                return False
-            
+            send_target = self.group_unified_msg_origins.get(str(group_id)) or str(group_id)
+            if send_target == str(group_id):
+                self.logger.debug(f"群组 {group_id} 未找到 unified_msg_origin，直接使用群组ID推送")
+
             # 构建MessageChain
             message_chain = MessageChain()
             
@@ -111,7 +107,7 @@ class PushService:
                 message_chain = message_chain.message(message)
             
             # 使用主动消息API发送
-            await self.context.send_message(unified_msg_origin, message_chain)
+            await self.context.send_message(send_target, message_chain)
             self.logger.info(f"✅ 主动消息发送成功: 群组 {group_id}")
             return True
             
@@ -185,6 +181,8 @@ class TimerManager:
         self.push_service = PushService(context, self.group_unified_msg_origins)
         
         self.timer_task: Optional[asyncio.Task] = None
+        self._timer_tasks: List[asyncio.Task] = []
+        self._timer_tasks_config: List[Any] = []
         self.status = TimerTaskStatus.STOPPED
         self.next_push_time: Optional[datetime] = None
         self.logger = astrbot_logger
@@ -279,7 +277,7 @@ class TimerManager:
                 return False
             
             # 检查定时功能是否启用
-            if not config.timer_enabled:
+            if not self._get_enabled_timer_tasks(config):
                 self.logger.info("定时功能未启用，跳过启动")
                 return False
             
@@ -287,58 +285,6 @@ class TimerManager:
             if not self._validate_timer_config(config):
                 self.logger.error("定时配置验证失败")
                 return False
-            
-            # 检查unified_msg_origin可用性（支持多种匹配方式）
-            # timer_target_groups 可能存储的是：
-            #   1. 群组ID（如 -1003715592711 或 1081839722）
-            #   2. unified_msg_origin 字符串（如 Amy:GroupMessage:1081839722）
-            missing_origins = []
-            for group_id in config.timer_target_groups:
-                group_id_str = str(group_id)
-                
-                # 方式1: 直接匹配键名
-                if group_id_str in self.push_service.group_unified_msg_origins:
-                    continue
-                
-                # 方式2: 匹配 unified_msg_origin 的值（提取最后一个:后的部分）
-                found = False
-                for origin_key, origin_value in self.push_service.group_unified_msg_origins.items():
-                    try:
-                        extracted_id = origin_value.rsplit(':', 1)[-1]
-                        if extracted_id == group_id_str:
-                            found = True
-                            break
-                    except (AttributeError, IndexError, ValueError):
-                        continue
-                
-                # 方式3: 如果 group_id_str 本身是 unified_msg_origin 格式（如 Amy:GroupMessage:1081839722）
-                # 尝试提取其中的群组ID并匹配
-                if not found and ':' in group_id_str:
-                    try:
-                        extracted_from_target = group_id_str.rsplit(':', 1)[-1]
-                        if extracted_from_target in self.push_service.group_unified_msg_origins:
-                            found = True
-                        # 方式4: 用提取的ID去匹配 unified_msg_origin 的值
-                        if not found:
-                            for origin_key, origin_value in self.push_service.group_unified_msg_origins.items():
-                                try:
-                                    origin_extracted = origin_value.rsplit(':', 1)[-1]
-                                    if origin_extracted == extracted_from_target:
-                                        found = True
-                                        break
-                                except (AttributeError, IndexError, ValueError):
-                                    continue
-                    except (AttributeError, IndexError, ValueError):
-                        pass
-                
-                if not found:
-                    missing_origins.append(group_id_str)
-            
-            if missing_origins:
-                self.logger.info(f"📋 以下群组尚未收集unified_msg_origin: {', '.join(missing_origins)}")
-                self.logger.info("💡 解决方案: 在对应群组中发送任意消息以收集unified_msg_origin")
-                self.logger.info("📝 定时任务仍会启动，但推送时会失败直到unified_msg_origin被收集")
-                self.logger.info("📋 提示: 可以使用 #手动推送发言榜 命令测试推送功能")
             
             # 如果任务已在运行，先停止（不再需要，因为已在锁内检查）
             if self.timer_task and not self.timer_task.done():
@@ -349,17 +295,31 @@ class TimerManager:
                 except asyncio.CancelledError:
                     pass
                 self._stop_event.clear()
-            
-            # 设置状态
+            for task in self._timer_tasks:
+                if not task.done():
+                    self._stop_event.set()
+                    task.cancel()
+            if self._timer_tasks:
+                await asyncio.gather(*self._timer_tasks, return_exceptions=True)
+                self._timer_tasks.clear()
+                self._timer_tasks_config = []
+                self._stop_event.clear()
+
+            enabled_tasks = self._get_enabled_timer_tasks(config)
+            if not enabled_tasks:
+                self.logger.error("未配置启用的定时任务")
+                return False
+
             self.status = TimerTaskStatus.RUNNING
-            
-            # 计算下次推送时间
-            self.next_push_time = self._calculate_next_push_time(config.timer_push_time)
-            
-            # 启动定时任务
-            self.timer_task = asyncio.create_task(self._timer_loop(config))
-            
-            self.logger.info(f"定时任务已启动，下次推送时间: {self.next_push_time}")
+            for task in enabled_tasks:
+                setattr(task, '_next_push_time', self._calculate_next_push_time(task.push_time))
+            self._timer_tasks_config = enabled_tasks
+            self._refresh_next_push_time()
+            self._timer_tasks = [asyncio.create_task(self._timer_loop(config, task_config)) for task_config in enabled_tasks]
+            self.timer_task = self._timer_tasks[0]
+
+            task_times = self._format_timer_task_times(enabled_tasks)
+            self.logger.info(f"定时任务已启动，共 {len(enabled_tasks)} 个任务，下次推送时间: {self.next_push_time}；全部任务: {task_times}")
             return True
     
     @safe_timer_operation(default_return=False)
@@ -382,6 +342,14 @@ class TimerManager:
             except asyncio.CancelledError:
                 pass
         
+        for task in self._timer_tasks:
+            if not task.done():
+                task.cancel()
+        if self._timer_tasks:
+            await asyncio.gather(*self._timer_tasks, return_exceptions=True)
+            self._timer_tasks.clear()
+            self._timer_tasks_config = []
+
         # 重置状态
         self.status = TimerTaskStatus.STOPPED
         self.next_push_time = None
@@ -432,15 +400,21 @@ class TimerManager:
             self.logger.error(f"恢复定时任务失败: {e}")
             return False
     
-    async def _timer_loop(self, config):
+    async def _timer_loop(self, config, task_config=None):
         """定时任务主循环
         
         Args:
             config: 插件配置对象
         """
+        task_config = task_config or self._get_primary_timer_task(config)
+        if not task_config:
+            self.logger.error("缺少定时任务配置，定时循环退出")
+            return
+        task_name = getattr(task_config, '__template_key', 'rank_push')
+        task_label = self._format_timer_task_label(task_config)
         # 更新文件锁，标记当前为最新 generation
         self._write_lock_file()
-        self.logger.info(f"定时任务循环 Generation {self._generation} 已启动")
+        self.logger.info(f"定时任务循环 Generation {self._generation} 已启动: {task_label}")
         
         try:
             while not self._stop_event.is_set():
@@ -458,24 +432,26 @@ class TimerManager:
                 
                 # 检查是否到达推送时间
                 now = datetime.now()
-                if self.next_push_time and now >= self.next_push_time:
+                task_next_push_time = getattr(task_config, '_next_push_time', None)
+                if task_next_push_time and now >= task_next_push_time:
                     # 执行前再次确认
                     if not self._is_latest_generation():
                         self.logger.info(f"推送前检测到更新的 Generation，当前 #{self._generation} 退出")
                         break
                     
                     # 计算下次推送时间
-                    next_time = self._calculate_next_push_time(config.timer_push_time)
-                    self.next_push_time = next_time
+                    next_time = self._calculate_next_push_time(task_config.push_time)
+                    setattr(task_config, '_next_push_time', next_time)
+                    self._refresh_next_push_time()
                     
                     try:
-                        self.logger.info(f"Generation {self._generation} 开始执行定时推送任务")
-                        success = await self._execute_push_task(config)
+                        self.logger.info(f"Generation {self._generation} 开始执行定时推送任务: {task_label}")
+                        success = await self._execute_push_task(config, task_config)
                         if success:
                             self.logger.info(f"✅ Generation {self._generation} 定时推送任务执行成功")
                         else:
                             self.logger.error(f"❌ Generation {self._generation} 定时推送任务执行失败")
-                        self.logger.info(f"下次推送时间: {self.next_push_time}")
+                        self.logger.info(f"全部任务下次推送时间: {self._format_timer_task_times(self._timer_tasks_config)}")
                     except Exception as e:
                         self.logger.error(f"Generation {self._generation} 定时推送异常: {e}")
                 
@@ -496,13 +472,13 @@ class TimerManager:
             await asyncio.sleep(300)
             if not self._stop_event.is_set():
                 self.logger.info(f"Generation {self._generation} 尝试重启定时任务")
-                self.timer_task = asyncio.create_task(self._timer_loop(config))
+                self.timer_task = asyncio.create_task(self._timer_loop(config, task_config))
         except Exception as e:
             self.logger.error(f"Generation {self._generation} 定时任务未知异常: {type(e).__name__}: {e}")
             self.status = TimerTaskStatus.ERROR
     
     @safe_timer_operation(default_return=False)
-    async def _execute_push_task(self, config) -> bool:
+    async def _execute_push_task(self, config, task_config=None) -> bool:
         """执行推送任务
         
         Args:
@@ -511,13 +487,16 @@ class TimerManager:
         Returns:
             bool: 推送是否成功
         """
+        task_config = task_config or self._get_primary_timer_task(config)
+        target_groups = task_config.target_groups if task_config else config.timer_target_groups
+        rank_type_value = task_config.rank_type if task_config else config.timer_rank_type
         success_count = 0
-        total_count = len(config.timer_target_groups)
-        
+        total_count = len(target_groups)
+
         self.logger.info(f"开始推送到 {total_count} 个群组")
         
         # 遍历所有目标群组
-        for group_id in config.timer_target_groups:
+        for group_id in target_groups:
             # 验证群组ID格式 - 确保是字符串类型
             if not isinstance(group_id, str):
                 self.logger.warning(f"跳过无效的群组ID类型: {type(group_id)}")
@@ -548,7 +527,7 @@ class TimerManager:
                 continue
             
             # 推送到指定群组
-            success = await self._push_to_group(actual_group_id, config)
+            success = await self._push_to_group(actual_group_id, config, rank_type_value)
             if success:
                 success_count += 1
                 self.logger.info(f"✅ 群组 {group_id} 推送成功")
@@ -664,7 +643,7 @@ class TimerManager:
             return f"群{group_id}"
     
     @safe_data_operation(default_return=False)
-    async def _push_to_group(self, group_id: str, config) -> bool:
+    async def _push_to_group(self, group_id: str, config, rank_type_value: str = None) -> bool:
         """向指定群组推送排行榜
         
         Args:
@@ -796,7 +775,7 @@ class TimerManager:
         
         # 根据排行榜类型筛选数据
         # 定时推送强制使用今日排行榜
-        rank_type = self._parse_rank_type(config.timer_rank_type)
+        rank_type = self._parse_rank_type(rank_type_value or config.timer_rank_type)
         filtered_data = await self._filter_data_by_rank_type(group_data, rank_type)
         if not filtered_data:
 
@@ -894,6 +873,51 @@ class TimerManager:
             self.logger.error(f"生成排行榜图片失败: {e}")
             return None
     
+    def _format_timer_task_label(self, task) -> str:
+        template_key = getattr(task, '__template_key', 'rank_push')
+        push_time = getattr(task, 'push_time', '09:00')
+        rank_type = getattr(task, 'rank_type', 'daily')
+        groups = getattr(task, 'target_groups', []) or []
+        next_time = getattr(task, '_next_push_time', None)
+        next_text = next_time.strftime('%Y-%m-%d %H:%M:%S') if next_time else '未计算'
+        return f"{template_key} time={push_time} rank={rank_type} groups={len(groups)} next={next_text}"
+
+    def _format_timer_task_times(self, tasks) -> str:
+        return "; ".join(self._format_timer_task_label(task) for task in tasks) or "无"
+
+    def _refresh_next_push_time(self):
+        next_times = []
+        for task in getattr(self, '_timer_tasks_config', []):
+            next_time = getattr(task, '_next_push_time', None)
+            if next_time:
+                next_times.append(next_time)
+        self.next_push_time = min(next_times) if next_times else None
+
+    def _get_enabled_timer_tasks(self, config) -> List[Any]:
+        tasks = getattr(config, 'timer_tasks', None)
+        if isinstance(tasks, list) and tasks:
+            return [task for task in tasks if getattr(task, 'enabled', False)]
+        if getattr(config, 'timer_enabled', False):
+            return [self._get_primary_timer_task(config)]
+        return []
+
+    def _get_primary_timer_task(self, config):
+        tasks = getattr(config, 'timer_tasks', None)
+        if isinstance(tasks, list) and tasks:
+            enabled_tasks = [task for task in tasks if getattr(task, 'enabled', False)]
+            return enabled_tasks[0] if enabled_tasks else tasks[0]
+
+        class LegacyTimerTask:
+            pass
+
+        task = LegacyTimerTask()
+        task.__template_key = 'rank_push'
+        task.enabled = getattr(config, 'timer_enabled', False)
+        task.push_time = getattr(config, 'timer_push_time', '09:00')
+        task.target_groups = getattr(config, 'timer_target_groups', [])
+        task.rank_type = getattr(config, 'timer_rank_type', 'daily')
+        return task
+
     def _validate_timer_config(self, config) -> bool:
         """验证定时配置
         
@@ -907,25 +931,26 @@ class TimerManager:
             bool: 验证是否通过
         """
         try:
-            # 验证推送时间格式
-            if not self._validate_time_format(config.timer_push_time):
-                self.logger.error(f"无效的推送时间格式: {config.timer_push_time}")
+            enabled_tasks = self._get_enabled_timer_tasks(config)
+            if not enabled_tasks:
+                self.logger.error("未配置启用的定时任务")
                 return False
-            
-            # 验证目标群组
-            if not config.timer_target_groups:
-                self.logger.error("未配置目标群组")
-                return False
-            
-            # 验证排行榜类型
-            try:
-                self._parse_rank_type(config.timer_rank_type)
-            except ValueError:
-                self.logger.error(f"无效的排行榜类型: {config.timer_rank_type}")
-                return False
-            
+
+            for task in enabled_tasks:
+                if not self._validate_time_format(task.push_time):
+                    self.logger.error(f"无效的推送时间格式: {task.push_time}")
+                    return False
+                if not task.target_groups:
+                    self.logger.error("未配置目标群组")
+                    return False
+                try:
+                    self._parse_rank_type(task.rank_type)
+                except ValueError:
+                    self.logger.error(f"无效的排行榜类型: {task.rank_type}")
+                    return False
+
             return True
-            
+
         except (ValueError, TypeError, KeyError, RuntimeError) as e:
             self.logger.error(f"验证定时配置时发生错误: {e}")
             return False
@@ -1018,15 +1043,27 @@ class TimerManager:
         """
         rank_type_mapping = {
             'total': RankType.TOTAL,
+            '总榜': RankType.TOTAL,
             'daily': RankType.DAILY,
+            '今日榜': RankType.DAILY,
+            '日榜': RankType.DAILY,
+            '今天': RankType.DAILY,
             'week': RankType.WEEKLY,
             'weekly': RankType.WEEKLY,
+            '本周榜': RankType.WEEKLY,
+            '周榜': RankType.WEEKLY,
             'month': RankType.MONTHLY,
             'monthly': RankType.MONTHLY,
+            '本月榜': RankType.MONTHLY,
+            '月榜': RankType.MONTHLY,
             'year': RankType.YEARLY,
             'yearly': RankType.YEARLY,
+            '本年榜': RankType.YEARLY,
+            '年榜': RankType.YEARLY,
             'lastyear': RankType.LAST_YEAR,
-            'last_year': RankType.LAST_YEAR
+            'last_year': RankType.LAST_YEAR,
+            '去年榜': RankType.LAST_YEAR,
+            '去年': RankType.LAST_YEAR
         }
         
         rank_type_str = rank_type_str.lower()
@@ -1204,7 +1241,8 @@ class TimerManager:
                 "next_push_time": self.next_push_time.isoformat() if self.next_push_time else None,
                 "time_until_next": None,
                 "is_running": self.status == TimerTaskStatus.RUNNING,
-                "task_exists": self.timer_task is not None and not self.timer_task.done(),
+                "task_exists": any(not task.done() for task in self._timer_tasks) if self._timer_tasks else (self.timer_task is not None and not self.timer_task.done()),
+                "task_count": len([task for task in self._timer_tasks if not task.done()]),
                 "push_service_initialized": self.push_service is not None
             }
             
@@ -1251,18 +1289,24 @@ class TimerManager:
             else:
                 # 推送到所有配置群组
                 success_count = 0
-                for target_group in config.timer_target_groups:
-                    group_id_str = str(target_group).strip()
-                    actual_group_id = group_id_str
-                    if ':' in group_id_str:
-                        try:
-                            extracted = group_id_str.rsplit(':', 1)[-1]
-                            if extracted.lstrip('-').isdigit():
-                                actual_group_id = extracted
-                        except (AttributeError, IndexError, ValueError):
-                            pass
-                    if await self._push_to_group(actual_group_id, config):
-                        success_count += 1
+                seen_pushes = set()
+                for task_config in self._get_enabled_timer_tasks(config):
+                    for target_group in task_config.target_groups:
+                        group_id_str = str(target_group).strip()
+                        actual_group_id = group_id_str
+                        if ':' in group_id_str:
+                            try:
+                                extracted = group_id_str.rsplit(':', 1)[-1]
+                                if extracted.lstrip('-').isdigit():
+                                    actual_group_id = extracted
+                            except (AttributeError, IndexError, ValueError):
+                                pass
+                        push_key = (actual_group_id, task_config.rank_type)
+                        if push_key in seen_pushes:
+                            continue
+                        seen_pushes.add(push_key)
+                        if await self._push_to_group(actual_group_id, config, task_config.rank_type):
+                            success_count += 1
                 
                 return success_count > 0
                 
@@ -1291,20 +1335,22 @@ class TimerManager:
                 self.group_unified_msg_origins = group_unified_msg_origins
             
             # 检查定时任务状态
-            is_running = self.status == TimerTaskStatus.RUNNING and self.timer_task and not self.timer_task.done()
+            is_running = self.status == TimerTaskStatus.RUNNING and any(not task.done() for task in self._timer_tasks)
+            if not is_running:
+                is_running = self.status == TimerTaskStatus.RUNNING and self.timer_task and not self.timer_task.done()
             
             # 如果定时功能被禁用，停止已运行的任务
-            if not config.timer_enabled:
+            if not self._get_enabled_timer_tasks(config):
                 if is_running:
                     await self.stop_timer()
                     self.logger.info("定时功能已禁用，定时任务已停止")
                 return True
             
-            # 如果定时任务已在运行，只更新映射表，不重新启动
+            # 配置可能已变更，重启任务以应用 template_list 中的时间/群组/类型
             if is_running:
-                self.logger.info("定时配置已更新（unified_msg_origin映射表已刷新）")
-                return True
-            
+                await self.stop_timer()
+                is_running = False
+
             # 如果定时任务未运行，尝试启动
             if self.context and self.push_service:
                 success = await self.start_timer(config)

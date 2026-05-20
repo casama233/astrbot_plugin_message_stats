@@ -505,7 +505,18 @@ if (!B) {
     if (db) {
       db.onclick = function() {
         MD_MSG.textContent = '确定要删除此群组的所有发言数据吗？此操作不可恢复！';
-        MD_CB = function() { B.apiGet('delete', { group_id: SEL }).then(function() { GD = GD.filter(function(x) { return x.group_id !== SEL; }); SEL = null; renderSidebar(); renderDetail(true); }).catch(function() {}); };
+        MD_CB = function() {
+          const done = function() { GD = GD.filter(function(x) { return x.group_id !== SEL; }); SEL = null; renderSidebar(); renderDetail(true); };
+          if (B.apiPost) {
+            B.apiPost('delete', { group_id: SEL }).then(done).catch(function() {});
+          } else {
+            fetch('delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ group_id: SEL })
+            }).then(function(r) { return r.json(); }).then(done).catch(function() {});
+          }
+        };
         MD.style.display = 'flex';
       };
     }

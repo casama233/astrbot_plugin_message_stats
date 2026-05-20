@@ -54,40 +54,50 @@
     "default": "图片",
     "options": ["文字", "图片"]
   },
-  "timer_enabled": {
-    "type": "bool",
-    "description": "是否启用定时推送排行榜功能",
-    "hint": "开启后将在指定时间自动向指定群组推送排行榜",
-    "default": false
-  },
-  "timer_push_time": {
-    "type": "string",
-    "description": "定时推送时间",
-    "hint": "推送时间，支持HH:MM格式（每日指定时间）或cron格式（复杂定时表达式，如'0 9 * * *'表示每天9点）",
-    "default": "09:00",
-    "invisible": false
-  },
-  "timer_target_groups": {
-    "type": "list",
-    "description": "定时推送目标群组",
-    "hint": "需要接收定时推送的群组ID列表，留空则推送到所有群组",
-    "default": [],
-    "invisible": false
-  },
-  "timer_rank_type": {
-    "type": "string",
-    "description": "定时推送排行榜类型",
-    "hint": "选择定时推送的排行榜统计范围",
-    "default": "daily",
-    "options": [
-      "daily",
-      "total",
-      "weekly",
-      "monthly",
-      "yearly",
-      "lastyear"
-    ],
-    "invisible": false
+  "timer_tasks": {
+    "type": "template_list",
+    "description": "定时推送任务",
+    "hint": "可添加多个定时推送任务；保存后每个任务会包含 __template_key 和对应配置项",
+    "templates": {
+      "rank_push": {
+        "name": "排行榜定时推送",
+        "hint": "在指定时间向指定群组推送发言排行榜",
+        "items": {
+          "enabled": {
+            "type": "bool",
+            "description": "启用此任务",
+            "hint": "关闭后此任务不会执行",
+            "default": true
+          },
+          "push_time": {
+            "type": "string",
+            "description": "推送时间",
+            "hint": "支持 HH:MM 格式（每日指定时间）或 cron 格式（如 0 9 * * * 表示每天9点）",
+            "default": "09:00"
+          },
+          "target_groups": {
+            "type": "list",
+            "description": "推送目标群组",
+            "hint": "需要接收定时推送的群组ID列表，留空则不推送",
+            "default": []
+          },
+          "rank_type": {
+            "type": "string",
+            "description": "排行榜类型",
+            "hint": "选择定时推送的排行榜统计范围",
+            "default": "daily",
+            "options": [
+              "今日榜",
+              "总榜",
+              "本周榜",
+              "本月榜",
+              "本年榜",
+              "去年榜"
+            ]
+          }
+        }
+      }
+    }
   },
   "milestone_enabled": {
     "type": "bool",
