@@ -255,7 +255,11 @@ class MessageStatsPlugin(Star):
             'lastyear': RankType.LAST_YEAR,
             'last_year': RankType.LAST_YEAR,
             '去年榜': RankType.LAST_YEAR,
-            '去年': RankType.LAST_YEAR
+            '去年': RankType.LAST_YEAR,
+            'yesterday': RankType.YESTERDAY,
+            '昨日榜': RankType.YESTERDAY,
+            '昨日': RankType.YESTERDAY,
+            '昨天': RankType.YESTERDAY
         }
         return mapping.get(rank_type_str, RankType.TOTAL)
 
@@ -294,6 +298,9 @@ class MessageStatsPlugin(Star):
         today = date.today()
         if rank_type == RankType.DAILY:
             return today, today
+        if rank_type == RankType.YESTERDAY:
+            yesterday = today - timedelta(days=1)
+            return yesterday, yesterday
         if rank_type == RankType.WEEKLY:
             return today - timedelta(days=today.weekday()), today
         if rank_type == RankType.MONTHLY:
@@ -1309,6 +1316,12 @@ class MessageStatsPlugin(Star):
         async for result in self._show_rank(event, RankType.LAST_YEAR):
             yield result
 
+    @filter.command("昨日发言榜", alias={'昨天发言榜', '昨日排行', '昨日水群榜', '昨日B话榜'})
+    async def show_yesterday_rank(self, event: AstrMessageEvent):
+        """显示昨日排行榜，别名：昨天发言榜/昨日排行/昨日水群榜/昨日B话榜"""
+        async for result in self._show_rank(event, RankType.YESTERDAY):
+            yield result
+
     @filter.command("查看发言", alias={'查询发言', '我的发言'})
     async def show_personal_stats(self, event: AstrMessageEvent, target_user: str = ""):
         """显示个人发言统计，支持查询他人(带@或填ID)"""
@@ -2044,6 +2057,9 @@ class MessageStatsPlugin(Star):
             return None, None, "total"
         elif rank_type == RankType.DAILY:
             return current_date, current_date, "daily"
+        elif rank_type == RankType.YESTERDAY:
+            yesterday = current_date - timedelta(days=1)
+            return yesterday, yesterday, "yesterday"
         elif rank_type == RankType.WEEKLY:
             # 获取本周开始日期(周一)
             days_since_monday = current_date.weekday()
@@ -2079,7 +2095,7 @@ class MessageStatsPlugin(Star):
         # 策略：如果时间段较短（日榜），直接计算；如果时间段较长（周榜/月榜），使用缓存
         
         # 所有时间段类型统一走批量优化路径
-        if rank_type in [RankType.DAILY, RankType.WEEKLY, RankType.MONTHLY, RankType.YEARLY, RankType.LAST_YEAR]:
+        if rank_type in [RankType.DAILY, RankType.YESTERDAY, RankType.WEEKLY, RankType.MONTHLY, RankType.YEARLY, RankType.LAST_YEAR]:
             return await self._calculate_period_rank_optimized(group_data, start_date, end_date)
         
         return []
@@ -2179,6 +2195,9 @@ class MessageStatsPlugin(Star):
             return "总发言排行榜"
         elif rank_type == RankType.DAILY:
             return f"[{now.year}年{now.month}月{now.day}日]发言榜单"
+        elif rank_type == RankType.YESTERDAY:
+            yesterday = now - timedelta(days=1)
+            return f"[{yesterday.year}年{yesterday.month}月{yesterday.day}日]昨日发言榜单"
         elif rank_type == RankType.WEEKLY:
             # 计算周数
             week_num = now.isocalendar().week
