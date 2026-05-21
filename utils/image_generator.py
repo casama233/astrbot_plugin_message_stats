@@ -13,6 +13,7 @@ import os
 import traceback
 import hashlib
 import json
+import shutil
 import uuid
 import html
 from urllib.parse import quote
@@ -226,13 +227,13 @@ class ImageGenerator:
             self.logger.info(f"自动主题切换已启用，当前时间匹配主题: {theme}")
         
         template_map = {
-            'default': 'rank_template_premium_light.html',
-            'premium_light': 'rank_template_premium_light.html',
-            'premium_dark': 'rank_template_premium_dark.html',
+            'default': 'rank_template_cartoon_light.html',
+            'cartoon_light': 'rank_template_cartoon_light.html',
+            'cartoon_dark': 'rank_template_cartoon_dark.html',
             'liquid_glass': 'rank_template_liquid_glass.html',
             'liquid_glass_dark': 'rank_template_liquid_glass_dark.html',
-            'bubble': 'rank_template_premium_light.html',
-            'bubble_dark': 'rank_template_premium_dark.html',
+            'bubble': 'rank_template_cartoon_light.html',
+            'bubble_dark': 'rank_template_cartoon_dark.html',
         }
         template_file = template_map.get(theme, 'rank_template.html')
         self.template_path = self._templates_dir / template_file
@@ -267,15 +268,15 @@ class ImageGenerator:
             
             # 深色→浅色 映射表（深色时段配置的主题在浅色时段自动映射）
             light_theme_map = {
-                'premium_dark': 'premium_light',
+                'cartoon_dark': 'cartoon_light',
                 'liquid_glass_dark': 'liquid_glass',
             }
             # 浅色→深色 映射表（浅色时段配置的主题在深色时段自动映射）
             dark_theme_map = {
                 'liquid_glass': 'liquid_glass_dark',
-                'default': 'premium_dark',
-                'premium_light': 'premium_dark',
-                'bubble': 'premium_dark',
+                'default': 'cartoon_dark',
+                'cartoon_light': 'cartoon_dark',
+                'bubble': 'cartoon_dark',
             }
             
             # 判断当前时间段
@@ -284,7 +285,7 @@ class ImageGenerator:
                 return light_theme_map.get(base_theme, base_theme)
             else:
                 # 深色时间段：浅色主题自动映射回深色版本
-                return dark_theme_map.get(base_theme, 'premium_dark')
+                return dark_theme_map.get(base_theme, 'cartoon_dark')
         except (ValueError, AttributeError, KeyError, TypeError) as e:
             self.logger.warning(f"自动主题切换时间解析失败，使用默认主题: {e}")
             return base_theme
@@ -427,10 +428,10 @@ class ImageGenerator:
             raise ImageGenerationError(f"初始化失败: {e}")
     
     async def _cleanup_stale_temp_files(self):
-        """清理上次异常退出残留的临时图片文件
+        """清理上次异常退出残留的临时图片文件和 Playwright 临时数据目录
         
         当插件被 kill -9、OOM 杀死、断电等异常情况时，
-        finally 块不会执行，tmp 文件会残留。
+        finally 块不会执行，tmp 文件和 Playwright profiles 会残留。
         每次初始化时扫描临时目录，清理残留文件。
         """
         try:
@@ -448,6 +449,23 @@ class ImageGenerator:
                         pass
             if cleaned > 0:
                 self.logger.info(f"启动清理：已删除 {cleaned} 个上次残留的临时图片文件")
+            
+            # 清理 Playwright 残留的临时 profiles 目录
+            # 进程异常退出时这些目录不会被 playwright.stop() 清理
+            pw_dirs_cleaned = 0
+            for entry in os.listdir(temp_dir):
+                entry_path = os.path.join(temp_dir, entry)
+                if not os.path.isdir(entry_path):
+                    continue
+                # Playwright 自动生成的临时目录前缀
+                if entry.startswith(("playwright-", "playwright_", "msgstats_pw_")):
+                    try:
+                        shutil.rmtree(entry_path, ignore_errors=True)
+                        pw_dirs_cleaned += 1
+                    except OSError:
+                        pass
+            if pw_dirs_cleaned > 0:
+                self.logger.info(f"启动清理：已删除 {pw_dirs_cleaned} 个上次残留的 Playwright 临时目录")
         except Exception as e:
             self.logger.warning(f"清理残留临时文件时出现异常: {e}")
     
