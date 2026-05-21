@@ -86,7 +86,7 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `theme` | string | `default` | 排行榜主题风格：`default`（经典浅色）、`liquid_glass`（液态玻璃）、`liquid_glass_dark`（液态玻璃暗色） |
+| `theme` | string | `default` | 排行榜主题风格：`default`（手绘卡通浅色）、`cartoon_light`（手绘卡通浅色）、`cartoon_dark`（手绘卡通深色）、`liquid_glass`（液态玻璃）、`liquid_glass_dark`（液态玻璃暗色） |
 | `auto_theme_switch` | bool | `false` | 是否根据时间自动切换主题（浅色/深色），启用后会覆盖手动设置的 theme |
 | `theme_switch_light_time` | string | `06:00` | 浅色主题开始时间，格式 HH:MM |
 | `theme_switch_dark_time` | string | `18:00` | 深色主题开始时间，格式 HH:MM |
@@ -131,7 +131,9 @@ astrbot_plugin_message_stats/
 │   └── cmd_config.json   # 命令配置
 ├── templates/            # 模板目录
 │   ├── __init__.py
-│   ├── rank_template.html # 排行榜模板（default主题）
+│   ├── rank_template.html # 排行榜默认模板
+│   ├── rank_template_cartoon_light.html # 手绘卡通浅色主题
+│   ├── rank_template_cartoon_dark.html # 手绘卡通深色主题
 │   ├── rank_template_liquid_glass.html # 液态玻璃主题模板
 │   └── rank_template_liquid_glass_dark.html # 液态玻璃暗色主题模板
 └── utils/                # 工具模块
@@ -156,6 +158,13 @@ astrbot_plugin_message_stats/
 - **飞书（Lark/Feishu）** - 完整功能支持
 
 ## 📝 更新日志
+
+### v2.0.2 (2026-05-21)
+- ✅ 手绘卡通主题（cartoon_light/cartoon_dark）
+
+### v2.0.1 (2026-05-21)
+- ✅ 修复 #设置发言榜数量 命令报错
+- ✅ 修复 WebUI 排行榜输出模式选项不可选
 
 ### v1.9.1 (2026-05-07)
 - ✅ 跨平台真实头像获取

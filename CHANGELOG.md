@@ -1,5 +1,16 @@
 # 更新日志
 
+## v2.0.2 (2026-05-21)
+
+### ✨ 新功能
+- **手绘卡通主题系列**：`premium_light` / `premium_dark` 替换为 `cartoon_light` / `cartoon_dark` 两款手绘卡通风格排行榜主题，采用 ZCOOL KuaiLe 卡通字体、不规则圆角、粗边框阴影偏移、星星装饰等手绘元素
+
+## v2.0.1 (2026-05-21)
+
+### 🐛 Bug 修复
+- **修复 `#设置发言榜数量` 命令报错**：`MAX_RANK_COUNT` 类常量缺失导致 `self.MAX_RANK_COUNT` 触发 `AttributeError`，现已补全
+- **修复 WebUI 排行榜输出模式选项不可选**：`_conf_schema.json` 中 `if_send_pic` 使用了不支持的 `value`/`label` 对象格式且 `default` 类型不匹配，改用标准 `options` 数组格式
+
 ## v2.0.0 (2026-05-20)
 
 ### ✨ 新功能
