@@ -167,8 +167,6 @@ astrbot_plugin_message_stats/
 ### v2.0.3 (2026-05-22)
 - ✅ 新增 #查看发言 命令（个人专属统计卡片）
 - ✅ 戳一戳计入发言统计
-- ✅ 个人卡片采用 Liquid Glass 毛玻璃配色
-- ✅ 修复 LLM 头衔频繁重新生成
 
 ### v2.0.2 (2026-05-21)
 - ✅ 手绘卡通主题（cartoon_light/cartoon_dark）
