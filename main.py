@@ -19,7 +19,7 @@ import orjson
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.event.filter import EventMessageType
 from astrbot.api.star import Context, Star, register, StarTools
-from astrbot.api import logger as astrbot_logger
+from astrbot.api import logger
 
 # 本地模块导入
 from .utils.data_manager import DataManager
@@ -63,7 +63,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.0.0")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.0.1")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -121,7 +121,7 @@ class MessageStatsPlugin(Star):
         context.register_web_api(
             "/astrbot_plugin_message_stats/delete",
             self.page_delete,
-            ["GET"],
+            ["POST"],
             "删除群组发言数据",
         )
         context.register_web_api(
@@ -131,10 +131,10 @@ class MessageStatsPlugin(Star):
             "群组发言趋势图表数据",
         )
 
-        self.logger = astrbot_logger
+        self.logger = logger
         
-        # 使用StarTools获取插件数据目录
-        data_dir = StarTools.get_data_dir('message_stats')
+        # 使用旧版 message_stats 数据目录，避免老用户升级后数据目录变化导致历史统计不可见
+        data_dir = Path(StarTools.get_data_dir('message_stats'))
         
         # 初始化组件
         self.data_manager = DataManager(data_dir)
@@ -232,34 +232,93 @@ class MessageStatsPlugin(Star):
         except Exception as e:
             self.logger.debug(f"保存群组名称文件失败: {e}")
     
+    def _parse_rank_type_value(self, rank_type: str) -> RankType:
+        rank_type_str = str(rank_type or 'total').strip().lower()
+        mapping = {
+            'total': RankType.TOTAL,
+            '总榜': RankType.TOTAL,
+            'daily': RankType.DAILY,
+            '今日榜': RankType.DAILY,
+            '日榜': RankType.DAILY,
+            'week': RankType.WEEKLY,
+            'weekly': RankType.WEEKLY,
+            '本周榜': RankType.WEEKLY,
+            '周榜': RankType.WEEKLY,
+            'month': RankType.MONTHLY,
+            'monthly': RankType.MONTHLY,
+            '本月榜': RankType.MONTHLY,
+            '月榜': RankType.MONTHLY,
+            'year': RankType.YEARLY,
+            'yearly': RankType.YEARLY,
+            '本年榜': RankType.YEARLY,
+            '年榜': RankType.YEARLY,
+            'lastyear': RankType.LAST_YEAR,
+            'last_year': RankType.LAST_YEAR,
+            '去年榜': RankType.LAST_YEAR,
+            '去年': RankType.LAST_YEAR
+        }
+        return mapping.get(rank_type_str, RankType.TOTAL)
+
+    def _is_valid_group_id(self, group_id: str) -> bool:
+        return bool(re.fullmatch(r"-?\d{5,32}", str(group_id or "")))
+
+    async def _is_existing_group_id(self, group_id: str) -> bool:
+        return str(group_id) in {str(gid) for gid in await self.data_manager.get_all_groups()}
+
+    def _is_same_origin_request(self, request) -> bool:
+        host = request.headers.get('Host', '') if request else ''
+        origin = request.headers.get('Origin', '') if request else ''
+        referer = request.headers.get('Referer', '') if request else ''
+        sec_fetch_site = request.headers.get('Sec-Fetch-Site', '') if request else ''
+        if sec_fetch_site and sec_fetch_site not in {'same-origin', 'same-site', 'none'}:
+            return False
+        if origin:
+            return host and origin.split('://', 1)[-1].split('/', 1)[0] == host
+        if referer:
+            return host and referer.split('://', 1)[-1].split('/', 1)[0] == host
+        return bool(sec_fetch_site == 'none')
+
+    def _schedule_file_cleanup(self, file_path: str, delay_seconds: int = 300):
+        if file_path:
+            asyncio.create_task(self._cleanup_file_later(str(file_path), delay_seconds))
+
+    async def _cleanup_file_later(self, file_path: str, delay_seconds: int):
+        try:
+            await asyncio.sleep(delay_seconds)
+            if os.path.exists(file_path):
+                os.unlink(file_path)
+        except OSError as e:
+            self.logger.warning(f"清理临时图片文件失败: {file_path}, 错误: {e}")
+
+    def _get_web_rank_period(self, rank_type: RankType):
+        today = date.today()
+        if rank_type == RankType.DAILY:
+            return today, today
+        if rank_type == RankType.WEEKLY:
+            return today - timedelta(days=today.weekday()), today
+        if rank_type == RankType.MONTHLY:
+            return today.replace(day=1), today
+        if rank_type == RankType.YEARLY:
+            return today.replace(month=1, day=1), today
+        if rank_type == RankType.LAST_YEAR:
+            return date(today.year - 1, 1, 1), date(today.year - 1, 12, 31)
+        return None, None
+
     async def page_stats(self):
         try:
             from quart import request
-            from datetime import date, timedelta
             import os
             gid = request.args.get('group_id') if request else None
-            rank_type = request.args.get('rank_type', 'total') if request else 'total'
+            rank_type = self._parse_rank_type_value(request.args.get('rank_type', 'total') if request else 'total')
             if gid:
+                if not self._is_valid_group_id(gid):
+                    return self._jsonify({"status":"error","message":"group_id参数无效"})
                 users = await self.data_manager.get_group_data(gid)
                 if not users:
                     return self._jsonify({"status":"ok","data":{"group":None}})
                 act = [u for u in users if u.message_count>0]
                 # 根据 rank_type 计算时间段内数据
-                today = date.today()
-                if rank_type == 'daily':
-                    start, end = today, today
-                elif rank_type == 'week':
-                    days_since_monday = today.weekday()
-                    start = today - timedelta(days=days_since_monday)
-                    end = today
-                elif rank_type == 'month':
-                    start = today.replace(day=1)
-                    end = today
-                elif rank_type == 'year':
-                    start = today.replace(month=1, day=1)
-                    end = today
-                else:
-                    start, end = None, None
+                start, end = self._get_web_rank_period(rank_type)
                 
                 if start is not None:
                     # 按时段排序
@@ -314,29 +373,44 @@ class MessageStatsPlugin(Star):
             c = self.plugin_config
             return self._jsonify({"status":"ok","data":{"groups":gd,"config":{"rand":c.rand,"if_send_pic":c.if_send_pic},"timer":ts}})
         except Exception as e:
-            return self._jsonify({"status":"error","message":str(e)})
-    
+            self.logger.error(f"Web统计接口失败: {e}", exc_info=True)
+            return self._jsonify({"status":"error","message":"获取统计数据失败"})
+
     async def page_delete(self):
         """Web API: 删除群组数据"""
         try:
             from quart import request
-            gid = request.args.get('group_id') if request else None
+            if not self._is_same_origin_request(request):
+                return self._jsonify({"status":"error","message":"请求来源无效"})
+
+            form = await request.form
+            gid = form.get('group_id') if form else None
+            if not gid:
+                payload = await request.get_json(silent=True)
+                gid = payload.get('group_id') if isinstance(payload, dict) else None
             if not gid:
                 return self._jsonify({"status":"error","message":"缺少group_id参数"})
-            ok = await self.data_manager.clear_group_data(gid)
+            if not self._is_valid_group_id(gid):
+                return self._jsonify({"status":"error","message":"group_id参数无效"})
+            if not await self._is_existing_group_id(gid):
+                return self._jsonify({"status":"error","message":"群组数据不存在"})
+            ok = await self.data_manager.clear_group_data(str(gid))
             if ok:
                 self.logger.info(f"Web面板删除群组数据: {gid}")
                 return self._jsonify({"status":"ok","message":"已删除"})
             return self._jsonify({"status":"error","message":"删除失败"})
         except Exception as e:
-            return self._jsonify({"status":"error","message":str(e)})
-    
+            self.logger.error(f"Web删除接口失败: {e}", exc_info=True)
+            return self._jsonify({"status":"error","message":"删除失败"})
+
     async def page_chart(self):
         """Web API: 获取群组近7天发言趋势"""
         try:
             from quart import request
             from datetime import date, timedelta
             gid = request.args.get('group_id') if request else None
+            if gid and not self._is_valid_group_id(gid):
+                return self._jsonify({"status":"error","message":"group_id参数无效"})
             if not gid:
                 return self._jsonify({"status":"ok","data":{"days":[],"counts":[]}})
             
@@ -362,7 +436,8 @@ class MessageStatsPlugin(Star):
             
             return self._jsonify({"status":"ok","data":{"days":days,"counts":counts}})
         except Exception as e:
-            return self._jsonify({"status":"error","message":str(e)})
+            self.logger.error(f"Web图表接口失败: {e}", exc_info=True)
+            return self._jsonify({"status":"error","message":"获取图表数据失败"})
 
     def _convert_to_plugin_config(self) -> PluginConfig:
         """将AstrBot配置转换为插件配置对象"""
@@ -386,6 +461,18 @@ class MessageStatsPlugin(Star):
                         theme_times['dark'] = config_dict.pop('theme_switch_dark_time')
                     config_dict['theme_switch_times'] = theme_times
             
+            # 兼容旧版独立定时配置，迁移为 template_list 保存结构
+            if 'timer_tasks' not in config_dict and (
+                config_dict.get('timer_enabled') or config_dict.get('timer_target_groups')
+            ):
+                config_dict['timer_tasks'] = [{
+                    "__template_key": "rank_push",
+                    "enabled": config_dict.get('timer_enabled', False),
+                    "push_time": config_dict.get('timer_push_time', '09:00'),
+                    "target_groups": config_dict.get('timer_target_groups', []),
+                    "rank_type": config_dict.get('timer_rank_type', 'daily')
+                }]
+
             # 如果 llm_system_prompt 为空，回填默认提示词
             # 用户保存 Web 配置后空值会被持久化，升级时也不会被 schema 默认值覆盖
             if not config_dict.get('llm_system_prompt', ''):
@@ -627,7 +714,9 @@ class MessageStatsPlugin(Star):
             await self.image_generator.initialize()
             self.logger.info("图片生成器初始化成功")
         except ImageGenerationError as e:
-            self.logger.warning(f"图片生成器初始化失败: {e}")
+            self.logger.warning(f"图片生成器初始化失败，已回退到文字模式: {e}")
+            self.image_generator = None
+            self.plugin_config.if_send_pic = 0
         
         # 记录当前配置状态
         self.logger.info(f"当前配置: 主题={self.plugin_config.theme}, 图片模式={self.plugin_config.if_send_pic}, 显示人数={self.plugin_config.rand}")
@@ -1002,7 +1091,11 @@ class MessageStatsPlugin(Star):
             group_info = GroupInfo(group_id=str(group_id), unified_msg_origin=unified_msg_origin)
             group_name = await self._get_group_name(None, group_id)
             group_info.group_name = group_name
-            
+
+            if not self.image_generator:
+                self.logger.warning("里程碑推送：图片生成器未初始化")
+                return
+
             # 生成里程碑个人成就卡片
             image_path = await self.image_generator.generate_milestone_image(
                 user_id=user_id,
@@ -1030,14 +1123,8 @@ class MessageStatsPlugin(Star):
                 await self.context.send_message(unified_msg_origin, message_chain)
                 self.logger.info(f"✅ 里程碑推送成功: {nickname} 发言 {current_count} 次")
             finally:
-                # 清理临时图片（确保无论send_message是否异常都执行）
-                if image_path:
-                    try:
-                        if os.path.exists(image_path):
-                            os.unlink(image_path)
-                    except Exception as e:
-                        self.logger.warning(f"清理里程碑图片失败: {e}")
-                    
+                self._schedule_file_cleanup(image_path)
+
         except Exception as e:
             self.logger.error(f"里程碑推送失败: {e}", exc_info=True)
     
@@ -1117,7 +1204,11 @@ class MessageStatsPlugin(Star):
             group_info = GroupInfo(group_id=str(group_id), unified_msg_origin=unified_msg_origin)
             group_name = await self._get_group_name(event, group_id)
             group_info.group_name = group_name
-            
+
+            if not self.image_generator:
+                yield event.plain_result("图片生成器未初始化，无法生成个人里程碑卡片！")
+                return
+
             # 生成里程碑个人成就卡片
             image_path = await self.image_generator.generate_milestone_image(
                 user_id=user_id,
@@ -1137,20 +1228,12 @@ class MessageStatsPlugin(Star):
                 return
             
             # 使用框架标准的 image_result 返回图片
-            try:
-                yield event.image_result(image_path)
-            finally:
-                # 清理临时图片文件（确保无论yield后续是否执行都清理）
-                if image_path:
-                    try:
-                        if os.path.exists(image_path):
-                            os.unlink(image_path)
-                    except Exception as e:
-                        self.logger.warning(f"清理里程碑临时图片失败: {image_path}, 错误: {e}")
-                    
+            yield event.image_result(image_path)
+            self._schedule_file_cleanup(image_path)
+
         except Exception as e:
             self.logger.error(f"里程碑获取失败: {e}", exc_info=True)
-            yield event.plain_result(f"获取里程碑失败: {str(e)}")
+            yield event.plain_result("获取里程碑失败，请稍后重试！")
 
     
     @filter.command("发言榜", alias={'水群榜', 'B话榜', '发言排行', '发言统计'})
@@ -1496,28 +1579,29 @@ class MessageStatsPlugin(Star):
                         
                         # 修复：llm_title 可能存为空字符串 ""（旧数据污染），统一视为无头衔处理
                         # 同时无头衔用户也需要满足 min_daily_messages 才触发 LLM，避免低发言用户频繁触发
-                        ranked_users_for_llm = [user for user, _ in filtered_data[:config.rand]]
+                        ranked_users_for_llm = filtered_data[:config.rand]
                         users_need_llm = []
                         users_with_title = []
                         min_daily = getattr(config, 'llm_min_daily_messages', 0)
-                        for u in ranked_users_for_llm:
+                        for u, period_count in ranked_users_for_llm:
                             # 判断是否有有效头衔（兼容空字符串脏数据）
                             has_title = bool(u.llm_title and u.llm_title.strip())
-                            
+                            threshold_count = period_count
+
                             if not has_title:
-                                # 无头衔用户：必须满足 min_daily 才触发 LLM
-                                if min_daily > 0 and u.message_count < min_daily:
+                                # 无头衔用户：必须满足当前榜单周期内阈值才触发 LLM
+                                if min_daily > 0 and threshold_count < min_daily:
                                     users_with_title.append(u)
                                     continue
                                 users_need_llm.append(u)
                             elif u.llm_title_message_count == 0:
-                                # 旧数据没有记录生成时的发言数，检查总发言数是否达标
-                                if min_daily > 0 and u.message_count >= min_daily:
+                                # 旧数据没有记录生成时的发言数，检查当前榜单周期内发言数是否达标
+                                if min_daily > 0 and threshold_count >= min_daily:
                                     users_need_llm.append(u)
                                 else:
                                     users_with_title.append(u)
-                            elif min_daily > 0 and (u.message_count - u.llm_title_message_count) >= min_daily:
-                                # 增量达到阈值，重新生成
+                            elif min_daily > 0 and threshold_count >= min_daily:
+                                # 当前榜单周期内达到阈值，重新生成
                                 users_need_llm.append(u)
                             else:
                                 users_with_title.append(u)
@@ -1735,6 +1819,11 @@ class MessageStatsPlugin(Star):
                 user_data.display_total = count
                 users_for_image.append(user_data)
             
+            if not self.image_generator:
+                text_msg = self._generate_text_message(filtered_data, group_info, title, config)
+                yield event.plain_result(text_msg)
+                return
+
             # 使用图片生成器（传入titles_map）
             temp_path = await self.image_generator.generate_rank_image(
                 users_for_image, group_info, title, current_user_id, llm_token_usage, titles_map
@@ -1744,6 +1833,7 @@ class MessageStatsPlugin(Star):
             # 检查图片文件是否存在
             if os.path.exists(temp_path):
                 yield event.image_result(str(temp_path))
+                self._schedule_file_cleanup(str(temp_path))
             else:
                 # 回退到文字模式
                 text_msg = self._generate_text_message(filtered_data, group_info, title, config)
@@ -1769,13 +1859,12 @@ class MessageStatsPlugin(Star):
             # 回退到文字模式
             text_msg = self._generate_text_message(filtered_data, group_info, title, config)
             yield event.plain_result(text_msg)
+        except AttributeError as e:
+            self.logger.error(f"图片渲染失败(生成器未初始化): {e}")
+            text_msg = self._generate_text_message(filtered_data, group_info, title, config)
+            yield event.plain_result(text_msg)
         finally:
-            # 清理临时文件，避免资源泄漏
-            if temp_path and os.path.exists(temp_path):
-                try:
-                    os.unlink(temp_path)
-                except OSError as e:
-                    self.logger.warning(f"清理临时图片文件失败: {temp_path}, 错误: {e}")
+            pass
     
     async def _render_rank_as_text(self, event: AstrMessageEvent, filtered_data: List[tuple], 
                                  group_info: GroupInfo, title: str, config: PluginConfig):
@@ -2029,6 +2118,18 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"获取定时状态失败: {e}")
             yield event.plain_result("获取定时状态失败，请稍后重试！")
     
+    async def _apply_timer_config_update(self, config: PluginConfig) -> bool:
+        config.sync_primary_timer_task()
+        self.plugin_config = config
+        await self.data_manager.save_config(config)
+        self.data_manager.set_plugin_config(config)
+        if self.timer_manager:
+            success = await self.timer_manager.update_config(config, self.group_unified_msg_origins)
+            if not success:
+                self.logger.warning("配置已保存，但定时任务运行态更新失败，可能需要重新加载插件或等待群组 unified_msg_origin 收集完成")
+            return success
+        return True
+
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("手动推送发言榜")
     async def manual_push(self, event: AstrMessageEvent):
@@ -2058,7 +2159,7 @@ class MessageStatsPlugin(Star):
             if success:
                 yield event.plain_result("✅ 手动推送执行成功！")
             else:
-                yield event.plain_result("❌ 手动推送执行失败！\n\n💡 可能的原因：\n• 缺少 unified_msg_origin\n• 群组权限不足\n\n🔧 解决方案：\n• 在群组中发送任意消息以收集 unified_msg_origin\n• 检查机器人是否有群组发言权限")
+                yield event.plain_result("❌ 手动推送执行失败！\n\n💡 可能的原因：\n• 目标群组暂无发言数据\n• 群组ID配置错误\n• 机器人缺少群组发言权限\n\n🔧 解决方案：\n• 确认目标群组已有统计数据\n• 检查定时推送群组配置\n• 检查机器人是否有群组发言权限")
             
         except (AttributeError, TypeError, RuntimeError, ValueError, KeyError, ConnectionError, asyncio.TimeoutError) as e:
             self.logger.error(f"处理手动推送请求失败: {e}")
@@ -2102,11 +2203,9 @@ class MessageStatsPlugin(Star):
             
             # 自动启用定时功能
             config.timer_enabled = True
-            
-            # 更新定时任务
+            success = await self._apply_timer_config_update(config)
             rank_type_text = self._get_rank_type_text(config.timer_rank_type)
             if self.timer_manager:
-                success = await self.timer_manager.update_config(config, self.group_unified_msg_origins)
                 if success:
                     yield event.plain_result(
                         f"✅ 定时推送设置完成！\n"
@@ -2156,11 +2255,8 @@ class MessageStatsPlugin(Star):
             # 获取当前配置（使用转换后的配置）
             config = self.plugin_config
             config.timer_target_groups = valid_groups
-            
-            # 更新定时任务
-            if self.timer_manager and config.timer_enabled:
-                await self.timer_manager.update_config(config, self.group_unified_msg_origins)
-            
+            await self._apply_timer_config_update(config)
+
             groups_text = "\n".join([f"   • {group_id}" for group_id in valid_groups])
             yield event.plain_result(f"✅ 定时推送目标群组已设置：\n{groups_text}")
             
@@ -2183,11 +2279,8 @@ class MessageStatsPlugin(Star):
             if not args:
                 # 清空所有定时群组
                 config.timer_target_groups = []
-                
-                # 更新定时任务
-                if self.timer_manager and config.timer_enabled:
-                    await self.timer_manager.update_config(config, self.group_unified_msg_origins)
-                
+                await self._apply_timer_config_update(config)
+
                 yield event.plain_result("✅ 已清空所有定时推送目标群组")
                 return
             
@@ -2210,12 +2303,8 @@ class MessageStatsPlugin(Star):
             
             # 保存配置
             config.timer_target_groups = remaining_groups
-            await self.data_manager.save_config(config)
-            
-            # 更新定时任务
-            if self.timer_manager and config.timer_enabled:
-                await self.timer_manager.update_config(config, self.group_unified_msg_origins)
-            
+            await self._apply_timer_config_update(config)
+
             if groups_to_remove:
                 removed_text = "\n".join([f"   • {group_id}" for group_id in groups_to_remove])
                 remaining_text = "\n".join([f"   • {group_id}" for group_id in remaining_groups]) if remaining_groups else "   无"
@@ -2242,15 +2331,9 @@ class MessageStatsPlugin(Star):
             
             # 启用定时功能
             config.timer_enabled = True
-            
-            # 更新定时任务（使用update_config确保group_unified_msg_origins被正确传递）
+            success = await self._apply_timer_config_update(config)
+
             if self.timer_manager:
-                # 检查TimerManager是否有有效的context
-                if not hasattr(self.timer_manager, 'context') or not self.timer_manager.context:
-                    yield event.plain_result("⚠️ 定时管理器未完全初始化！\n\n💡 可能的原因：\n• 插件初始化过程中出现异常\n• 上下文信息缺失\n\n🔧 解决方案：\n• 重启机器人或重新加载插件\n• 检查插件配置是否正确")
-                    return
-                
-                success = await self.timer_manager.update_config(config, self.group_unified_msg_origins)
                 if success:
                     yield event.plain_result("✅ 定时推送功能已启用！")
                 else:
@@ -2272,11 +2355,8 @@ class MessageStatsPlugin(Star):
             
             # 禁用定时功能
             config.timer_enabled = False
-            
-            # 停止定时任务
-            if self.timer_manager:
-                await self.timer_manager.stop_timer()
-            
+            await self._apply_timer_config_update(config)
+
             yield event.plain_result("✅ 定时推送功能已禁用！")
             
         except (IOError, OSError, RuntimeError, AttributeError, ValueError, TypeError, ConnectionError, asyncio.TimeoutError) as e:
@@ -2296,21 +2376,32 @@ class MessageStatsPlugin(Star):
                 return
             
             rank_type = args[0].lower()
-            
+            rank_type_aliases = {
+                '总榜': 'total',
+                '今日榜': 'daily',
+                '日榜': 'daily',
+                '本周榜': 'weekly',
+                '周榜': 'weekly',
+                '本月榜': 'monthly',
+                '月榜': 'monthly',
+                '本年榜': 'yearly',
+                '年榜': 'yearly',
+                '去年榜': 'lastyear',
+                '去年': 'lastyear'
+            }
+            rank_type = rank_type_aliases.get(rank_type, rank_type)
+
             # 验证排行榜类型
-            valid_types = ['total', 'daily', 'week', 'weekly', 'month', 'monthly']
+            valid_types = ['total', 'daily', 'week', 'weekly', 'month', 'monthly', 'year', 'yearly', 'lastyear', 'last_year']
             if rank_type not in valid_types:
-                yield event.plain_result(f"排行榜类型错误！可用类型: {', '.join(valid_types)}")
+                yield event.plain_result("排行榜类型错误！可用类型: 总榜/今日榜/本周榜/本月榜/本年榜/去年榜")
                 return
             
             # 获取当前配置（使用转换后的配置）
             config = self.plugin_config
             config.timer_rank_type = rank_type
-            
-            # 更新定时任务
-            if self.timer_manager and config.timer_enabled:
-                await self.timer_manager.update_config(config, self.group_unified_msg_origins)
-            
+            await self._apply_timer_config_update(config)
+
             type_text = self._get_rank_type_text(rank_type)
             yield event.plain_result(f"✅ 定时推送排行榜类型已设置为 {type_text}！")
             
@@ -2372,10 +2463,25 @@ class MessageStatsPlugin(Star):
         """
         type_mapping = {
             'total': '总排行榜',
-            'daily': '今日排行榜', 
+            '总榜': '总排行榜',
+            'daily': '今日排行榜',
+            '今日榜': '今日排行榜',
+            '日榜': '今日排行榜',
             'week': '本周排行榜',
             'weekly': '本周排行榜',
+            '本周榜': '本周排行榜',
+            '周榜': '本周排行榜',
             'month': '本月排行榜',
-            'monthly': '本月排行榜'
+            'monthly': '本月排行榜',
+            '本月榜': '本月排行榜',
+            '月榜': '本月排行榜',
+            'year': '本年排行榜',
+            'yearly': '本年排行榜',
+            '本年榜': '本年排行榜',
+            '年榜': '本年排行榜',
+            'lastyear': '去年排行榜',
+            'last_year': '去年排行榜',
+            '去年榜': '去年排行榜',
+            '去年': '去年排行榜'
         }
         return type_mapping.get(rank_type, rank_type)

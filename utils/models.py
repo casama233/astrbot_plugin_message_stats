@@ -20,9 +20,9 @@ from astrbot.api import logger
 
 class RankType(Enum):
     """排行榜类型枚举
-    
+
     定义了插件支持的排行榜类型，包括总榜、日榜、周榜、月榜、年榜和去年榜。
-    
+
     Attributes:
         TOTAL (str): 总排行榜，包含历史所有发言统计
         DAILY (str): 日排行榜，仅包含当日发言统计
@@ -30,7 +30,7 @@ class RankType(Enum):
         MONTHLY (str): 月排行榜，仅包含本月发言统计
         YEARLY (str): 年排行榜，仅包含本年发言统计
         LAST_YEAR (str): 去年排行榜，仅包含去年全年发言统计
-        
+
     Example:
         >>> rank_type = RankType.TOTAL
         >>> print(rank_type.value)
@@ -42,6 +42,73 @@ class RankType(Enum):
     MONTHLY = "monthly"
     YEARLY = "yearly"
     LAST_YEAR = "lastyear"
+
+
+@dataclass
+class TimerTaskConfig:
+    __template_key: str = "rank_push"
+    enabled: bool = True
+    push_time: str = "09:00"
+    target_groups: List[str] = field(default_factory=list)
+    rank_type: str = "daily"
+
+    @staticmethod
+    def dedupe_groups(groups: Any) -> List[str]:
+        seen = set()
+        deduped = []
+        if not isinstance(groups, list):
+            return deduped
+        for group in groups:
+            group_id = str(group).strip()
+            if group_id and group_id not in seen:
+                seen.add(group_id)
+                deduped.append(group_id)
+        return deduped
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'TimerTaskConfig':
+        task = cls()
+        if not isinstance(data, dict):
+            return task
+        task.__template_key = str(data.get("__template_key", "rank_push"))
+        task.enabled = bool(data.get("enabled", True))
+        task.push_time = str(data.get("push_time", data.get("timer_push_time", "09:00")))
+        groups = data.get("target_groups", data.get("timer_target_groups", []))
+        task.target_groups = cls.dedupe_groups(groups)
+        task.rank_type = cls.normalize_rank_type(data.get("rank_type", data.get("timer_rank_type", "daily")))
+        return task
+
+    @staticmethod
+    def normalize_rank_type(rank_type: Any) -> str:
+        rank_type_str = str(rank_type).strip().lower()
+        mapping = {
+            "今日榜": "daily",
+            "日榜": "daily",
+            "今天": "daily",
+            "总榜": "total",
+            "本周榜": "weekly",
+            "周榜": "weekly",
+            "本月榜": "monthly",
+            "月榜": "monthly",
+            "本年榜": "yearly",
+            "年榜": "yearly",
+            "去年榜": "lastyear",
+            "去年": "lastyear",
+            "week": "weekly",
+            "month": "monthly",
+            "year": "yearly",
+            "last_year": "lastyear"
+        }
+        return mapping.get(rank_type_str, rank_type_str)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "__template_key": self.__template_key,
+            "enabled": self.enabled,
+            "push_time": self.push_time,
+            "target_groups": self.target_groups,
+            "rank_type": self.rank_type
+        }
 
 
 @dataclass
@@ -431,6 +498,7 @@ class PluginConfig:
         self.detailed_logging_enabled = True  # 默认开启详细日志，便于调试
         
         # 定时功能配置
+        self.timer_tasks: List[TimerTaskConfig] = []
         self.timer_enabled = False
         self.timer_push_time = "09:00"
         self.timer_target_groups = []
@@ -462,7 +530,35 @@ class PluginConfig:
         
         # 提示词版本号，版本升级时自动覆写
         self.llm_prompt_version = ""
-    
+
+    def get_primary_timer_task(self) -> TimerTaskConfig:
+        enabled_tasks = [task for task in self.timer_tasks if task.enabled]
+        if enabled_tasks:
+            return enabled_tasks[0]
+        if self.timer_tasks:
+            return self.timer_tasks[0]
+        task = TimerTaskConfig(
+            enabled=self.timer_enabled,
+            push_time=self.timer_push_time,
+            target_groups=list(self.timer_target_groups),
+            rank_type=TimerTaskConfig.normalize_rank_type(self.timer_rank_type)
+        )
+        self.timer_tasks.append(task)
+        return task
+
+    def sync_primary_timer_task(self):
+        task = self.get_primary_timer_task()
+        task.enabled = self.timer_enabled
+        task.push_time = self.timer_push_time
+        task.target_groups = TimerTaskConfig.dedupe_groups(self.timer_target_groups)
+        task.rank_type = TimerTaskConfig.normalize_rank_type(self.timer_rank_type)
+        enabled_tasks = [timer_task for timer_task in self.timer_tasks if timer_task.enabled]
+        self.timer_enabled = bool(enabled_tasks)
+        primary_task = enabled_tasks[0] if enabled_tasks else task
+        self.timer_push_time = primary_task.push_time
+        self.timer_target_groups = primary_task.target_groups
+        self.timer_rank_type = primary_task.rank_type
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典
         
@@ -494,6 +590,7 @@ class PluginConfig:
             "rand": self.rand,
             "if_send_pic": self.if_send_pic,
             "detailed_logging_enabled": self.detailed_logging_enabled,
+            "timer_tasks": [task.to_dict() for task in self.timer_tasks],
             "timer_enabled": self.timer_enabled,
             "timer_push_time": self.timer_push_time,
             "timer_target_groups": self.timer_target_groups,
@@ -570,10 +667,32 @@ class PluginConfig:
         config.rand = data.get("rand", 20)
         config.if_send_pic = if_send_pic
         config.detailed_logging_enabled = data.get("detailed_logging_enabled", True)
-        config.timer_enabled = data.get("timer_enabled", False)
-        config.timer_push_time = data.get("timer_push_time", "09:00")
-        config.timer_target_groups = data.get("timer_target_groups", [])
-        config.timer_rank_type = data.get("timer_rank_type", "daily")
+        timer_tasks_raw = data.get("timer_tasks", [])
+        if isinstance(timer_tasks_raw, list):
+            config.timer_tasks = [TimerTaskConfig.from_dict(task) for task in timer_tasks_raw if isinstance(task, dict)]
+
+        legacy_timer_enabled = data.get("timer_enabled", False)
+        legacy_target_groups = data.get("timer_target_groups", [])
+        if not config.timer_tasks and (legacy_timer_enabled or legacy_target_groups):
+            config.timer_tasks = [TimerTaskConfig.from_dict({
+                "__template_key": "rank_push",
+                "enabled": legacy_timer_enabled,
+                "push_time": data.get("timer_push_time", "09:00"),
+                "target_groups": legacy_target_groups,
+                "rank_type": TimerTaskConfig.normalize_rank_type(data.get("timer_rank_type", "daily"))
+            })]
+
+        enabled_tasks = [task for task in config.timer_tasks if task.enabled]
+        primary_task = enabled_tasks[0] if enabled_tasks else (config.timer_tasks[0] if config.timer_tasks else None)
+        config.timer_enabled = bool(enabled_tasks)
+        if primary_task:
+            config.timer_push_time = primary_task.push_time
+            config.timer_target_groups = TimerTaskConfig.dedupe_groups(primary_task.target_groups)
+            config.timer_rank_type = primary_task.rank_type
+        else:
+            config.timer_push_time = data.get("timer_push_time", "09:00")
+            config.timer_target_groups = TimerTaskConfig.dedupe_groups(data.get("timer_target_groups", []))
+            config.timer_rank_type = TimerTaskConfig.normalize_rank_type(data.get("timer_rank_type", "daily"))
         config.blocked_users = data.get("blocked_users", [])
         config.blocked_groups = data.get("blocked_groups", [])
         config.milestone_enabled = data.get("milestone_enabled", False)

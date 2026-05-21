@@ -44,38 +44,6 @@
 - **移除冗余 `pydantic` 依赖**：插件中未使用 pydantic，且 AstrBot 框架已自带，`requirements.txt` 中已移除。
 - **`metadata.yaml` 添加 `astrbot_version` 声明**：添加 `astrbot_version: ">=4.16"`，确保版本兼容性检查。
 
-## v1.9.8 (2026-05-10)
-
-### 🐛 Bug 修复
-
-- **修复 `#设置发言榜数量` 命令报错**：`MAX_RANK_COUNT` 类常量缺失导致 `self.MAX_RANK_COUNT` 触发 `AttributeError`，现已补全
-- **修复 WebUI 排行榜输出模式选项不可选**：`_conf_schema.json` 中 `if_send_pic` 使用了不支持的 `value`/`label` 对象格式且 `default` 类型不匹配，改用标准 `options` 数组格式
-
-## v1.9.7 (2026-05-10)
-
-### ✨ 新功能
-
-- **Web 面板全新 UI 升级**：发言统计面板新增 Dock 栏时段切换（总/日/周/月/年）、群组迷你折线图（近7天发言趋势）、群组按总发言数排序、切换动画优化
-
-### 🐛 Bug 修复
-
-- **LLM 头衔频繁触发**：`llm_title` 存为空字符串 `""` 时被 `not u.llm_title` 误判为无头衔，导致每次都重新生成。已修复：改用 `bool(u.llm_title and u.llm_title.strip())` 判断有效头衔
-- **`page_stats` API 群组列表顺序随机**：已修复：按总发言数降序排序
-
-## v1.9.4 (2026-05-09)
-
-
-### 🐛 Bug 修复
-
-- **定时/手动推送排行榜类型硬编码**：`_push_to_group()` 中硬编码 `RankType.DAILY`，导致用户在 WebUI 设置的 `timer_rank_type` 配置完全无效。已修复：改为读取 `config.timer_rank_type`，定时推送和手动推送均可使用用户配置的排行榜类型。
-- **`#手动推送发言榜` 群组ID格式解析错误**：当 `timer_target_groups` 中存储 `Amy:GroupMessage:1081839722` 格式时，`manual_push()` 直接传入 `_push_to_group()` 导致 `get_group_data()` 校验失败。已修复：统一添加 unified_msg_origin 格式的群组 ID 提取逻辑。
-- **LLM 头衔生成重复调用浪费 Tokens**：`_push_to_group()` 中先对全体用户调用 `llm_analyzer.analyze_users()` 后才筛选已有持久化头衔的用户，导致每次推送都浪费一次 LLM 调用。已修复：先筛选出无头衔用户，只对这部分用户调用 LLM。
-
-### 🧹 代码清理
-
-- **移除冗余 `pydantic` 依赖**：插件中未使用 pydantic，且 AstrBot 框架已自带，`requirements.txt` 中已移除。
-- **`metadata.yaml` 添加 `astrbot_version` 声明**：添加 `astrbot_version: ">=4.16"`，确保版本兼容性检查。
-
 ## v1.9.3 (2026-05-07)
 
 ### 🔐 安全改进
