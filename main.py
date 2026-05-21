@@ -2555,6 +2555,9 @@ class MessageStatsPlugin(Star):
                 '总榜': 'total',
                 '今日榜': 'daily',
                 '日榜': 'daily',
+                '昨日榜': 'yesterday',
+                '昨日': 'yesterday',
+                '昨天': 'yesterday',
                 '本周榜': 'weekly',
                 '周榜': 'weekly',
                 '本月榜': 'monthly',
@@ -2567,9 +2570,9 @@ class MessageStatsPlugin(Star):
             rank_type = rank_type_aliases.get(rank_type, rank_type)
 
             # 验证排行榜类型
-            valid_types = ['total', 'daily', 'week', 'weekly', 'month', 'monthly', 'year', 'yearly', 'lastyear', 'last_year']
+            valid_types = ['total', 'daily', 'yesterday', 'week', 'weekly', 'month', 'monthly', 'year', 'yearly', 'lastyear', 'last_year']
             if rank_type not in valid_types:
-                yield event.plain_result("排行榜类型错误！可用类型: 总榜/今日榜/本周榜/本月榜/本年榜/去年榜")
+                yield event.plain_result("排行榜类型错误！可用类型: 总榜/今日榜/昨日榜/本周榜/本月榜/本年榜/去年榜")
                 return
             
             # 获取当前配置（使用转换后的配置）
