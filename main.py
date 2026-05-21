@@ -63,7 +63,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.0.2")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.0.3")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -627,6 +627,43 @@ class MessageStatsPlugin(Star):
     IMAGE_MODE_ENABLE_ALIASES = {'1', 'true', '开', 'on', 'yes'}
     IMAGE_MODE_DISABLE_ALIASES = {'0', 'false', '关', 'off', 'no'}
     
+    @filter.on_astrbot_loaded()
+    async def on_astrbot_loaded(self):
+        """AstrBot 加载完成后注册戳一戳事件监听（仅 aiocqhttp 平台）"""
+        try:
+            from astrbot.core.platform.platform_registry import get_platform_adapters
+            adapters = get_platform_adapters()
+            cqhttp = None
+            for a in adapters:
+                if a.__class__.__name__ == "AiocqhttpAdapter":
+                    cqhttp = a
+                    break
+            if not cqhttp:
+                self.logger.info("未检测到 Aiocqhttp 适配器，戳一戳统计不可用")
+                return
+            client = cqhttp.get_client()
+            if not client:
+                return
+            
+            @client.on_notice()
+            async def on_poke(event):
+                try:
+                    if getattr(event, 'sub_type', None) != 'poke':
+                        return
+                    if str(getattr(event, 'target_id', '')) != str(getattr(event, 'self_id', '')):
+                        return
+                    gid = str(getattr(event, 'group_id', ''))
+                    uid = str(getattr(event, 'user_id', ''))
+                    if gid and uid:
+                        self.logger.info(f"📌 戳一戳计入发言统计: {uid} in {gid}")
+                        await self._record_message_stats(gid, uid, f"用户{uid}")
+                except Exception as e:
+                    self.logger.debug(f"戳一戳处理异常: {e}")
+            
+            self.logger.info("✅ 戳一戳统计监听注册成功")
+        except Exception as e:
+            self.logger.info(f"戳一戳监听注册失败（非 aiocqhttp 平台）: {e}")
+
     async def initialize(self):
         """初始化插件
         
@@ -1271,6 +1308,124 @@ class MessageStatsPlugin(Star):
         """显示去年排行榜，别名：去年水群榜/去年发言排行/去年B话榜"""
         async for result in self._show_rank(event, RankType.LAST_YEAR):
             yield result
+
+    @filter.command("查看发言", alias={'查询发言', '我的发言'})
+    async def show_personal_stats(self, event: AstrMessageEvent, target_user: str = ""):
+        """显示个人发言统计，支持查询他人(带@或填ID)"""
+        group_id = event.get_group_id()
+        if not group_id:
+            yield event.plain_result("无法获取群组信息,请在群聊中使用此命令！")
+            return
+            
+        group_id = str(group_id)
+        target_uid = str(event.get_sender_id())
+        
+        # 解析目标用户
+        if target_user:
+            # 尝试从消息组件提取 AT
+            from astrbot.core.message.components import At
+            if hasattr(event, 'message_obj') and event.message_obj:
+                for comp in event.message_obj.message:
+                    if isinstance(comp, At) and hasattr(comp, 'qq'):
+                        target_uid = str(comp.qq)
+                        break
+                else:
+                    # 正则备用提取
+                    m = re.search(r'qq="?(\d+)"?', event.message_str or "")
+                    if m:
+                        target_uid = str(m.group(1))
+                    else:
+                        target_str = target_user.strip().replace('@', '')
+                        if target_str.isdigit():
+                            target_uid = target_str
+        
+        try:
+            group_data = await self.data_manager.get_group_data(group_id)
+            if not group_data:
+                yield event.plain_result("该群暂无发言数据！")
+                return
+            
+            target_user_data = None
+            total_messages_all = 0
+            rank = 1
+            
+            # 聚合数据
+            for u in group_data:
+                if not isinstance(u, UserData):
+                    continue
+                total_messages_all += u.message_count
+                if u.user_id == target_uid:
+                    target_user_data = u
+            
+            if not target_user_data:
+                yield event.plain_result(f"未找到该用户的发言记录！")
+                return
+                
+            # 计算排名
+            for u in group_data:
+                if isinstance(u, UserData) and u.message_count > target_user_data.message_count:
+                    rank += 1
+            
+            from datetime import date as date_cls, timedelta
+            today = date_cls.today()
+            week_start = today - timedelta(days=today.weekday())
+            month_start = today.replace(day=1)
+            
+            daily_count = target_user_data.get_message_count_in_period(today, today)
+            yesterday = today - timedelta(days=1)
+            yesterday_count = target_user_data.get_message_count_in_period(yesterday, yesterday)
+            weekly_count = target_user_data.get_message_count_in_period(week_start, today)
+            monthly_count = target_user_data.get_message_count_in_period(month_start, today)
+            
+            target_user_data._ensure_message_dates()
+            active_days = len(target_user_data._message_dates)
+            percentage = (target_user_data.message_count / total_messages_all * 100) if total_messages_all > 0 else 0
+            
+            nickname = await self._get_user_display_name(event, group_id, target_uid)
+            group_name = await self._get_group_name(event, group_id)
+            group_info = GroupInfo(group_id=group_id, group_name=group_name)
+            
+            avatar_url = ""
+            if self.image_generator:
+                # 预获取真实头像
+                await self.image_generator._prefetch_avatars([target_user_data], group_info)
+                avatar_url = self.image_generator._get_avatar_url(target_uid, nickname, group_info)
+                
+            data = {
+                'nickname': nickname,
+                'user_id': target_uid,
+                'avatar_url': avatar_url,
+                'total': target_user_data.message_count,
+                'daily': daily_count,
+                'yesterday': yesterday_count,
+                'weekly': weekly_count,
+                'monthly': monthly_count,
+                'active_days': active_days,
+                'last_date': target_user_data.last_date,
+                'llm_title': target_user_data.llm_title or target_user_data.display_title,
+                'llm_color': target_user_data.llm_title_color or target_user_data.display_title_color,
+                'rank': rank,
+                'percentage': f"{percentage:.1f}",
+            }
+            
+            if self.plugin_config.if_send_pic and self.image_generator:
+                img_path = await self.image_generator.generate_personal_stats_image(data, group_info)
+                if img_path:
+                    yield event.image_result(img_path)
+                    self._schedule_file_cleanup(img_path)
+                    return
+            
+            text = f"【个人发言统计】\n用户: {nickname} ({target_uid})\n"
+            text += f"总发言: {target_user_data.message_count}次 (第{rank}名, 占比{percentage:.1f}%)\n"
+            text += f"今日: {daily_count}次 | 本周: {weekly_count}次 | 本月: {monthly_count}次\n"
+            text += f"活跃天数: {active_days}天 | 最近互动: {target_user_data.last_date or '未知'}"
+            if data['llm_title']:
+                text += f"\n当前头衔: {data['llm_title']}"
+            yield event.plain_result(text)
+            
+        except Exception as e:
+            self.logger.error(f"查看发言失败: {e}", exc_info=True)
+            yield event.plain_result("查询发言记录失败,请稍后重试！")
     
     # ========== 设置命令 ==========
     
@@ -1586,22 +1741,23 @@ class MessageStatsPlugin(Star):
                         for u, period_count in ranked_users_for_llm:
                             # 判断是否有有效头衔（兼容空字符串脏数据）
                             has_title = bool(u.llm_title and u.llm_title.strip())
-                            threshold_count = period_count
+                            # 上次生成头衔以来的总发言增量（不是当前周期发言数）
+                            increment = u.message_count - u.llm_title_message_count
 
                             if not has_title:
-                                # 无头衔用户：必须满足当前榜单周期内阈值才触发 LLM
-                                if min_daily > 0 and threshold_count < min_daily:
+                                # 无头衔用户：总发言增量达到阈值才触发 LLM
+                                if min_daily > 0 and increment < min_daily:
                                     users_with_title.append(u)
                                     continue
                                 users_need_llm.append(u)
                             elif u.llm_title_message_count == 0:
-                                # 旧数据没有记录生成时的发言数，检查当前榜单周期内发言数是否达标
-                                if min_daily > 0 and threshold_count >= min_daily:
+                                # 旧数据没有记录生成时的发言数，按增量判断
+                                if min_daily > 0 and increment >= min_daily:
                                     users_need_llm.append(u)
                                 else:
                                     users_with_title.append(u)
-                            elif min_daily > 0 and threshold_count >= min_daily:
-                                # 当前榜单周期内达到阈值，重新生成
+                            elif min_daily > 0 and increment >= min_daily:
+                                # 上次生成头衔以来发言增量达到阈值，重新生成
                                 users_need_llm.append(u)
                             else:
                                 users_with_title.append(u)

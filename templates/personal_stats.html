@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人发言统计</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif; padding: 40px; min-height: 100vh; }
+        body.light-theme { background: linear-gradient(135deg, #E9EFF6 0%, #D6E4F0 100%); color: #1F2937; }
+        body.dark-theme { background: linear-gradient(135deg, #2a2d3e 0%, #253247 100%); color: #E5E7EB; }
+        .container { max-width: 520px; margin: 0 auto; }
+
+        .rank-card { border-radius: 20px; padding: 24px; margin: 0; overflow: hidden; }
+        body.light-theme .rank-card {
+            background: rgba(255,255,255,0.55); backdrop-filter: blur(16px) saturate(140%);
+            -webkit-backdrop-filter: blur(16px) saturate(140%);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.7);
+            border: 1px solid rgba(255,255,255,0.6);
+        }
+        body.dark-theme .rank-card {
+            background: rgba(255,255,255,0.08); backdrop-filter: blur(16px) saturate(140%);
+            -webkit-backdrop-filter: blur(16px) saturate(140%);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .header-section { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding-bottom: 20px; }
+        body.light-theme .header-section { border-bottom: 1px solid rgba(229,231,235,0.6); }
+        body.dark-theme .header-section { border-bottom: 1px solid rgba(255,255,255,0.06); }
+
+        .avatar-lg { width: 80px; height: 80px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+        body.light-theme .avatar-lg { border: 3px solid rgba(255,255,255,0.8); }
+        body.dark-theme .avatar-lg { border: 3px solid rgba(255,255,255,0.15); }
+        .avatar-placeholder-lg { width: 80px; height: 80px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 32px; }
+        body.light-theme .avatar-placeholder-lg { background: rgba(255,255,255,0.7); color: #9CA3AF; border: 3px solid rgba(255,255,255,0.8); }
+        body.dark-theme .avatar-placeholder-lg { background: rgba(255,255,255,0.1); color: #9CA3AF; border: 3px solid rgba(255,255,255,0.15); }
+
+        .user-info-area { flex: 1; min-width: 0; }
+        .nickname-lg { font-size: 24px; font-weight: 700; margin-bottom: 4px; word-break: break-all; }
+        body.light-theme .nickname-lg { color: #1F2937; }
+        body.dark-theme .nickname-lg { color: #F3F4F6; }
+        .badge-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+        .sub-text { font-size: 13px; }
+        body.light-theme .sub-text { color: #6B7280; }
+        body.dark-theme .sub-text { color: #9CA3AF; }
+        .title-badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+        body.light-theme .title-badge { background: rgba(124,58,237,0.13); border: 1px solid rgba(124,58,237,0.25); }
+        body.dark-theme .title-badge { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); }
+
+        .rank-badge { flex-shrink: 0; width: 72px; height: 72px; border-radius: 18px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: 700; }
+        body.light-theme .rank-badge { background: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.6); color: #3B82F6; }
+        body.dark-theme .rank-badge { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: #60A5FA; }
+        .rank-number { font-size: 28px; line-height: 1; }
+        .rank-label { font-size: 11px; font-weight: 500; margin-top: 2px; }
+        body.light-theme .rank-label { color: #6B7280; }
+        body.dark-theme .rank-label { color: #9CA3AF; }
+
+        /* 总发言数独立行 */
+        .total-section { margin-bottom: 20px; padding: 16px; border-radius: 16px; text-align: center; }
+        body.light-theme .total-section { background: rgba(255,255,255,0.35); border: 1px solid rgba(255,255,255,0.4); }
+        body.dark-theme .total-section { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); }
+        .total-value { font-size: 36px; font-weight: 700; font-feature-settings: "tnum"; line-height: 1.2; }
+        body.light-theme .total-value { color: #3B82F6; }
+        body.dark-theme .total-value { color: #60A5FA; }
+        .total-label { font-size: 14px; margin-top: 4px; }
+        body.light-theme .total-label { color: #6B7280; }
+        body.dark-theme .total-label { color: #9CA3AF; }
+
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+        .stat-item { border-radius: 16px; padding: 16px; text-align: center; }
+        body.light-theme .stat-item { background: rgba(255,255,255,0.35); border: 1px solid rgba(255,255,255,0.4); }
+        body.dark-theme .stat-item { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); }
+        .stat-value { font-size: 28px; font-weight: 700; font-feature-settings: "tnum"; line-height: 1.2; }
+        body.light-theme .stat-value { color: #1F2937; }
+        body.dark-theme .stat-value { color: #F3F4F6; }
+        .stat-value.primary { color: #3B82F6; }
+        body.dark-theme .stat-value.primary { color: #60A5FA; }
+        .stat-label { font-size: 13px; margin-top: 4px; }
+        body.light-theme .stat-label { color: #6B7280; }
+        body.dark-theme .stat-label { color: #9CA3AF; }
+
+        .detail-list { display: flex; flex-direction: column; }
+        .detail-row { display: flex; justify-content: space-between; padding: 12px 0; font-size: 14px; }
+        body.light-theme .detail-row { border-top: 1px solid rgba(229,231,235,0.6); }
+        body.dark-theme .detail-row { border-top: 1px solid rgba(255,255,255,0.06); }
+        .detail-row:last-child { padding-bottom: 0; }
+        .detail-label { font-weight: 500; }
+        body.light-theme .detail-label { color: #6B7280; }
+        body.dark-theme .detail-label { color: #9CA3AF; }
+        .detail-val { font-weight: 600; }
+        body.light-theme .detail-val { color: #374151; }
+        body.dark-theme .detail-val { color: #D1D5DB; }
+
+        .footer { text-align: center; margin-top: 24px; font-size: 14px; }
+        body.light-theme .footer { color: #6B7280; }
+        body.dark-theme .footer { color: #9CA3AF; }
+        .footer p { margin-bottom: 4px; }
+    </style>
+</head>
+<body class="{% if data.is_dark %}dark-theme{% else %}light-theme{% endif %}">
+    <div class="container">
+        <div class="rank-card">
+            <div class="header-section">
+                {% if data.avatar_url %}
+                    <img class="avatar-lg" src="{{ data.avatar_url }}" onerror="this.style.display='none'" />
+                {% else %}
+                    <div class="avatar-placeholder-lg">{{ data.nickname[0] if data.nickname else '?' }}</div>
+                {% endif %}
+                <div class="user-info-area">
+                    <div class="nickname-lg">{{ data.nickname }}</div>
+                    <div class="badge-row">
+                        <span class="sub-text">{{ data.user_id }}</span>
+                        {% if data.llm_title %}
+                        <span class="title-badge" style="color:{{ data.llm_color or '#7C3AED' }}">{{ data.llm_title }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="rank-badge">
+                    <div class="rank-number">#{{ data.rank }}</div>
+                    <div class="rank-label">排名</div>
+                </div>
+            </div>
+
+            <!-- 总发言数独立行 -->
+            <div class="total-section">
+                <div class="total-value">{{ data.total }}</div>
+                <div class="total-label">总发言数</div>
+            </div>
+
+            <!-- 2x2 网格：今日/昨日/本周/本月 -->
+            <div class="stats-grid">
+                <div class="stat-item"><div class="stat-value primary">{{ data.daily }}</div><div class="stat-label">今日发言</div></div>
+                <div class="stat-item"><div class="stat-value">{{ data.yesterday }}</div><div class="stat-label">昨日发言</div></div>
+                <div class="stat-item"><div class="stat-value">{{ data.weekly }}</div><div class="stat-label">本周发言</div></div>
+                <div class="stat-item"><div class="stat-value">{{ data.monthly }}</div><div class="stat-label">本月发言</div></div>
+            </div>
+
+            <div class="detail-list">
+                <div class="detail-row"><span class="detail-label">活跃天数</span><span class="detail-val">{{ data.active_days }} 天</span></div>
+                <div class="detail-row"><span class="detail-label">最后互动</span><span class="detail-val">{{ data.last_date if data.last_date else "暂无记录" }}</span></div>
+            </div>
+        </div>
+        <div class="footer">
+            <p>由 AstrBot 发言统计插件生成</p>
+            <p>生成时间: {{ data.current_time }}</p>
+        </div>
+    </div>
+</body>
+</html>
