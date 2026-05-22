@@ -41,6 +41,7 @@ class RankType(Enum):
     WEEKLY = "weekly"
     MONTHLY = "monthly"
     YEARLY = "yearly"
+    YESTERDAY = "yesterday"
     LAST_YEAR = "lastyear"
 
 
@@ -94,6 +95,9 @@ class TimerTaskConfig:
             "年榜": "yearly",
             "去年榜": "lastyear",
             "去年": "lastyear",
+            "昨日榜": "yesterday",
+            "昨日": "yesterday",
+            "昨天": "yesterday",
             "week": "weekly",
             "month": "monthly",
             "year": "yearly",

@@ -679,6 +679,116 @@ class ImageGenerator:
                     self.logger.warning(f"清理临时文件失败: {e}")
     
     @safe_generation(default_return=None)
+    async def generate_personal_stats_image(self, data: dict, group_info: GroupInfo) -> str:
+        """生成个人资料卡片图片
+        
+        Args:
+            data: 用户数据字典
+            group_info: 群组信息
+            
+        Returns:
+            str: 生成的图片路径，失败时返回None
+        """
+        # 按需启动浏览器
+        await self._ensure_browser()
+        
+        page = None
+        temp_path = None
+        success = False
+        try:
+            # 个人卡片使用 480 宽
+            page = await self.browser.new_page(device_scale_factor=2)
+            await page.set_viewport_size({"width": 480, "height": self.viewport_height})
+            
+            # 加载模板
+            template_path = self._templates_dir / "personal_stats.html"
+            if not os.path.exists(template_path):
+                self.logger.warning(f"个人卡片模板文件不存在: {template_path}")
+                return None
+            
+            # 检测是否应该深色
+            theme = getattr(self.config, 'theme', 'default')
+            auto_switch = getattr(self.config, 'auto_theme_switch', False)
+            if auto_switch:
+                theme = self._get_auto_theme(theme)
+            is_dark = theme.endswith('_dark')
+            data['is_dark'] = is_dark
+            data['current_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # 异步读取模板文件（与里程碑模板渲染方式一致，避免 Jinja2 缺少 FileSystemLoader 的问题）
+            async with aiofiles.open(template_path, 'r', encoding='utf-8') as f:
+                template_content = await f.read()
+            if JINJA2_AVAILABLE and self.jinja_env:
+                template_obj = self.jinja_env.from_string(template_content)
+                html_content = template_obj.render(data=data)
+            else:
+                html_content = template_content
+                # 简易替换 Jinja2 占位符
+                import re
+                def replace_placeholder(m):
+                    key = m.group(1).strip()
+                    keys = key.split('.')
+                    val = data
+                    for k in keys:
+                        if isinstance(val, dict):
+                            val = val.get(k, "")
+                        else:
+                            val = ""
+                            break
+                    return str(val)
+                html_content = re.sub(r'\{\{[^}]+\}\}', replace_placeholder, html_content)
+            
+            # 将HTML内容设置到页面
+            await page.set_content(html_content, wait_until='networkidle')
+            
+            # 等待图片加载完成
+            await page.evaluate("""
+                async () => {
+                    const images = Array.from(document.querySelectorAll('img'));
+                    await Promise.all(images.map(img => {
+                        if (img.complete) return Promise.resolve();
+                        return new Promise((resolve, reject) => {
+                            img.addEventListener('load', resolve);
+                            img.addEventListener('error', resolve); // 忽略加载错误的图片
+                        });
+                    }));
+                }
+            """)
+            
+            # 动态调整高度以适应内容，但不小于最小高度
+            height = await page.evaluate("() => document.getElementById('inspect-root') ? document.getElementById('inspect-root').offsetHeight : document.body.scrollHeight")
+            await page.set_viewport_size({"width": 480, "height": int(height)})
+            
+            # 生成临时文件路径
+            fd, temp_path = tempfile.mkstemp(suffix='.png', prefix='personal_stats_')
+            os.close(fd)
+            
+            # 截图
+            await page.screenshot(
+                path=temp_path,
+                full_page=True,
+                type='png'
+            )
+            
+            success = True
+            return temp_path
+            
+        except Exception as e:
+            self.logger.exception(f"生成个人卡片异常: {e}")
+            return None
+        finally:
+            if page:
+                try:
+                    await page.close()
+                except Exception as e:
+                    self.logger.debug(f"关闭页面失败: {e}")
+            if not success and temp_path and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except Exception:
+                    pass
+
+    @safe_generation(default_return=None)
     async def generate_milestone_image(self,
                                        user_id: str,
                                        nickname: str,
