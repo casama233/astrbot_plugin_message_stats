@@ -6,7 +6,7 @@
 
 一个功能强大的AstrBot群消息统计插件，支持自动统计群成员发言次数并生成排行榜。
 
-![Preview](https://github.com/xiaoruange39/Plugin-Preview-Image/blob/main/image/E2EB0A38BA876A2227FA99D997CA1969.jpg) 
+![Preview](https://s41.ax1x.com/2026/05/22/pmpwlSx.png) 
 
 ## 🚀 安装说明
 
