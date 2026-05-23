@@ -2,16 +2,16 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline' https:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; font-src 'self' file: data:; style-src 'self' 'unsafe-inline' https:;">
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
     <title>{{ title }}</title>
-    <style>{% raw %}
+    <style>{{ custom_font_css | safe }}{% raw %}
         @import url('https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&display=swap');
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: "ZCOOL KuaiLe", "Comic Sans MS", "Chalkboard SE", "Marker Felt", "PingFang SC", cursive, sans-serif;
+            font-family: var(--message-stats-font-family, "ZCOOL KuaiLe", "Comic Sans MS", "Chalkboard SE", "Marker Felt", "PingFang SC", cursive, sans-serif);
             background: #fef9ef;
             min-height: 100vh;
             padding: 32px 24px;

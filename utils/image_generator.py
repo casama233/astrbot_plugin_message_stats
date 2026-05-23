@@ -16,6 +16,7 @@ import json
 import shutil
 import uuid
 import html
+import base64
 from urllib.parse import quote
 
 from astrbot.api import logger as astrbot_logger
@@ -215,7 +216,9 @@ class ImageGenerator:
         
         # 头像缓存字典 {user_id: avatar_url}，每次生成图片时预获取，用完即弃
         self._avatar_cache: Dict[str, str] = {}
-    
+        self._font_css_cache_key = None
+        self._font_css_cache_value = ""
+
     def _update_template_path(self):
         """根据主题配置更新模板路径（支持自动根据时间切换主题）"""
         theme = getattr(self.config, 'theme', 'default')
@@ -353,7 +356,105 @@ class ImageGenerator:
     def _get_template_hash(self, content: str) -> str:
         """获取模板内容的哈希值，用于缓存验证"""
         return hashlib.md5(content.encode('utf-8')).hexdigest()
-    
+
+    def _resolve_font_path(self) -> Optional[Path]:
+        font_path = str(getattr(self.config, 'font_path', '') or '').strip()
+        if not font_path:
+            return None
+
+        raw_path = Path(font_path).expanduser()
+        candidates = []
+        if raw_path.is_absolute():
+            candidates.append(raw_path)
+        else:
+            candidates.extend([
+                Path(__file__).parent.parent / raw_path,
+                Path(__file__).parent.parent / "fonts" / raw_path.name,
+            ])
+            try:
+                data_dir = StarTools.get_data_dir("astrbot_plugin_message_stats")
+                candidates.append(Path(data_dir) / "resources" / "fonts" / raw_path.name)
+            except Exception:
+                pass
+
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return candidate.resolve()
+
+        self.logger.warning(f"自定义字体文件不存在，使用主题默认字体: {font_path}")
+        return None
+
+    def _get_font_format(self, font_path: Path) -> str:
+        suffix = font_path.suffix.lower()
+        if suffix in {'.otf'}:
+            return 'opentype'
+        if suffix in {'.woff'}:
+            return 'woff'
+        if suffix in {'.woff2'}:
+            return 'woff2'
+        return 'truetype'
+
+    def _get_font_mime_type(self, font_path: Path) -> str:
+        suffix = font_path.suffix.lower()
+        if suffix in {'.otf'}:
+            return 'font/otf'
+        if suffix in {'.woff'}:
+            return 'font/woff'
+        if suffix in {'.woff2'}:
+            return 'font/woff2'
+        return 'font/ttf'
+
+    def _get_custom_font_css(self) -> str:
+        font_path = self._resolve_font_path()
+        if not font_path:
+            self._font_css_cache_key = None
+            self._font_css_cache_value = ""
+            return ""
+
+        try:
+            stat = font_path.stat()
+            cache_key = (str(font_path), stat.st_mtime_ns, stat.st_size)
+            if cache_key == self._font_css_cache_key:
+                return self._font_css_cache_value
+
+            font_data = base64.b64encode(font_path.read_bytes()).decode('ascii')
+        except OSError as e:
+            self._font_css_cache_key = None
+            self._font_css_cache_value = ""
+            self.logger.warning(f"读取自定义字体文件失败，使用主题默认字体: {e}")
+            return ""
+
+        font_format = self._get_font_format(font_path)
+        mime_type = self._get_font_mime_type(font_path)
+        css = (
+            "@font-face { "
+            "font-family: 'MessageStatsCustomFont'; "
+            f"src: url(\"data:{mime_type};base64,{font_data}\") format('{font_format}'); "
+            "font-weight: 100 900; font-style: normal; font-display: block; "
+            "}\n"
+            ":root { --message-stats-font-family: 'MessageStatsCustomFont'; }"
+        )
+        self._font_css_cache_key = cache_key
+        self._font_css_cache_value = css
+        return css
+
+    async def _wait_for_assets(self, page: Page):
+        await page.evaluate("""
+            async () => {
+                if (document.fonts && document.fonts.ready) {
+                    await document.fonts.ready;
+                }
+                const images = Array.from(document.querySelectorAll('img'));
+                await Promise.all(images.map(img => {
+                    if (img.complete) return Promise.resolve();
+                    return new Promise(resolve => {
+                        img.addEventListener('load', resolve, { once: true });
+                        img.addEventListener('error', resolve, { once: true });
+                    });
+                }));
+            }
+        """)
+
     async def _get_cached_template(self) -> Optional[Union[str, Template]]:
         """获取缓存的模板"""
         async with self._cache_lock:
@@ -623,10 +724,8 @@ class ImageGenerator:
                 
             # 设置页面内容（使用 load 而非 networkidle，避免外部资源加载超时）
             await page.set_content(html_content, wait_until="load")
-            
-            # 等待页面加载完成
-            await page.wait_for_timeout(2000)
-            
+            await self._wait_for_assets(page)
+
             # 动态调整页面高度和宽度，确保边距一致
             body_height = await page.evaluate("document.body.scrollHeight")
             # 通过获取 container 的宽度加上两侧 padding 来确定精确的截图宽度
@@ -713,6 +812,7 @@ class ImageGenerator:
                 theme = self._get_auto_theme(theme)
             is_dark = theme.endswith('_dark')
             data['is_dark'] = is_dark
+            data['custom_font_css'] = self._get_custom_font_css()
             data['current_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             # 异步读取模板文件（与里程碑模板渲染方式一致，避免 Jinja2 缺少 FileSystemLoader 的问题）
@@ -740,21 +840,8 @@ class ImageGenerator:
             
             # 将HTML内容设置到页面
             await page.set_content(html_content, wait_until='networkidle')
-            
-            # 等待图片加载完成
-            await page.evaluate("""
-                async () => {
-                    const images = Array.from(document.querySelectorAll('img'));
-                    await Promise.all(images.map(img => {
-                        if (img.complete) return Promise.resolve();
-                        return new Promise((resolve, reject) => {
-                            img.addEventListener('load', resolve);
-                            img.addEventListener('error', resolve); // 忽略加载错误的图片
-                        });
-                    }));
-                }
-            """)
-            
+            await self._wait_for_assets(page)
+
             # 动态调整高度以适应内容，但不小于最小高度
             height = await page.evaluate("() => document.getElementById('inspect-root') ? document.getElementById('inspect-root').offsetHeight : document.body.scrollHeight")
             await page.set_viewport_size({"width": 480, "height": int(height)})
@@ -859,6 +946,7 @@ class ImageGenerator:
                 'group_total_messages': group_total_messages,
                 'percentage': f"{percentage:.2f}",
                 'current_time': current_time,
+                'custom_font_css': self._get_custom_font_css(),
             }
             
             # 渲染模板
@@ -874,8 +962,8 @@ class ImageGenerator:
             
             # 设置页面内容
             await page.set_content(html_content, wait_until="load")
-            await page.wait_for_timeout(2000)
-            
+            await self._wait_for_assets(page)
+
             # 动态调整页面高度
             body_height = await page.evaluate("document.body.scrollHeight")
             await page.set_viewport_size({"width": milestone_width, "height": body_height})
@@ -971,6 +1059,7 @@ class ImageGenerator:
             'total_messages': self._escape_html_safe(str(total_messages)),
             'user_count': self._escape_html_safe(str(len(users))),
             'current_time': self._escape_html_safe(current_time),
+            'custom_font_css': self._get_custom_font_css(),
             'llm_token_info': self._escape_html_safe(llm_token_text) if llm_token_text else ""
         }
         
@@ -1163,7 +1252,8 @@ class ImageGenerator:
         template_data = {
             'group_name': self._escape_html_safe(group_info.group_name or f"群{group_info.group_id}"),
             'group_id': self._escape_html_safe(str(group_info.group_id)),
-            'title': self._escape_html_safe(title)
+            'title': self._escape_html_safe(title),
+            'custom_font_css': self._get_custom_font_css()
         }
         
         try:
@@ -1191,8 +1281,9 @@ class ImageGenerator:
     <meta charset="UTF-8">
     <title>{{ title }}</title>
     <style>
+        {{ custom_font_css | safe }}
         body {
-            font-family: 'Microsoft YaHei', sans-serif;
+            font-family: var(--message-stats-font-family, 'Microsoft YaHei', sans-serif);
             background: linear-gradient(135deg, #E9EFF6 0%, #D6E4F0 100%);
             margin: 0;
             padding: 40px;

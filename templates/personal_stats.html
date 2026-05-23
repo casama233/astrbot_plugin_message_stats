@@ -5,8 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>个人发言统计</title>
     <style>
+        {{ data.custom_font_css | safe }}
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif; padding: 40px; min-height: 100vh; }
+        body { font-family: var(--message-stats-font-family, 'Microsoft YaHei', 'Segoe UI', sans-serif); padding: 40px; min-height: 100vh; }
         body.light-theme { background: linear-gradient(135deg, #E9EFF6 0%, #D6E4F0 100%); color: #1F2937; }
         body.dark-theme { background: linear-gradient(135deg, #2a2d3e 0%, #253247 100%); color: #E5E7EB; }
         .container { max-width: 520px; margin: 0 auto; }

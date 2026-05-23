@@ -4,13 +4,14 @@
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline' https:;">
+        content="default-src 'self'; img-src 'self' https: data:; font-src 'self' file: data:; style-src 'self' 'unsafe-inline' https:;">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
     <meta http-equiv="X-Frame-Options" content="DENY">
     <meta http-equiv="X-XSS-Protection" content="1; mode=block">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{title }}</title>
     <style>
+        {{ custom_font_css | safe }}
         {% raw %}
         * {
             margin: 0;
@@ -19,7 +20,7 @@
         }
 
         body {
-            font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+            font-family: var(--message-stats-font-family, 'Microsoft YaHei', 'Segoe UI', sans-serif);
             background: linear-gradient(135deg, #2a2d3e 0%, #253247 100%);
             padding: 40px;
             min-height: 100vh;

@@ -494,6 +494,7 @@ class PluginConfig:
     """
     def __init__(self):
         self.theme = "default"  # 排行榜主题风格: default, liquid_glass, liquid_glass_dark
+        self.font_path = ""  # 自定义图片字体路径
         self.auto_theme_switch = False  # 是否根据时间自动切换主题
         self.theme_switch_times = {"light": "06:00", "dark": "18:00"}  # 浅色/深色主题切换时间
         self.is_admin_restricted = 0
@@ -587,6 +588,7 @@ class PluginConfig:
         """
         return {
             "theme": self.theme,
+            "font_path": self.font_path,
             "auto_theme_switch": self.auto_theme_switch,
             "theme_switch_light_time": self.theme_switch_times.get("light", "06:00"),
             "theme_switch_dark_time": self.theme_switch_times.get("dark", "18:00"),
@@ -654,6 +656,7 @@ class PluginConfig:
         
         # 设置配置值
         config.theme = data.get("theme", "default")
+        config.font_path = str(data.get("font_path", "") or "").strip()
         config.auto_theme_switch = data.get("auto_theme_switch", False)
         
         # 兼容处理：从 theme_switch_times 字典或独立的 theme_switch_light_time/theme_switch_dark_time 字段读取

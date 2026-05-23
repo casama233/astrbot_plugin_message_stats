@@ -32,7 +32,7 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 - `#本月发言榜` - 查看本月发言排行榜
 - `#本年发言榜` - 查看本年发言排行榜
 - `#去年发言榜` - 查看去年发言排行榜
-- `#昨日发言榜` - 查看昨日发言排行榜
+- `#昨日发言榜` - 查看昨日发言排行榜（别名：`#昨天发言榜`、`#昨日排行`）
 
 #### 管理命令
 - `#设置发言榜数量 [数量]` - 设置排行榜显示人数（1-100）
@@ -93,6 +93,7 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | `theme` | string | `default` | 排行榜主题风格：`default`（手绘卡通浅色）、`cartoon_light`（手绘卡通浅色）、`cartoon_dark`（手绘卡通深色）、`liquid_glass`（液态玻璃）、`liquid_glass_dark`（液态玻璃暗色） |
+| `font_path` | string | `` | 自定义图片字体路径，支持绝对路径或相对插件目录的相对路径；留空使用主题默认字体，路径无效时自动回退默认字体 |
 | `auto_theme_switch` | bool | `false` | 是否根据时间自动切换主题（浅色/深色），启用后会覆盖手动设置的 theme |
 | `theme_switch_light_time` | string | `06:00` | 浅色主题开始时间，格式 HH:MM |
 | `theme_switch_dark_time` | string | `18:00` | 深色主题开始时间，格式 HH:MM |
@@ -120,6 +121,16 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 1. 通过AstrBot Web面板配置（推荐）
 2. 通过命令配置
 3. 编辑配置文件：`data/config.json`
+
+### 自定义字体
+
+在 Web 面板的 `font_path` 中填写字体文件路径即可让排行榜、个人统计卡片和里程碑卡片优先使用该字体。支持 `.ttf`、`.otf`、`.woff`、`.woff2` 字体文件。
+
+- 留空：使用当前主题模板的默认字体。
+- 绝对路径：例如 `C:\\Windows\\Fonts\\msyh.ttc`。
+- 相对路径：相对插件目录查找，也会尝试插件目录下的 `fonts/` 和插件数据目录下的 `resources/fonts/`。
+- 路径无效或读取失败：记录 warning 后自动回退默认字体，不影响图片生成。
+- 字体文件修改后会根据路径、修改时间和文件大小自动刷新缓存。
 
 ## 📁 文件结构
 
@@ -164,6 +175,13 @@ astrbot_plugin_message_stats/
 - **飞书（Lark/Feishu）** - 完整功能支持
 
 ## 📝 更新日志
+
+### v2.0.5 (2026-05-23)
+- ✅ 新增自定义字体配置（font_path）
+- ✅ 优化自定义字体渲染稳定性与并发缓存
+
+### v2.0.4 (2026-05-23)
+- ✅ 修复里程碑自动推送群名缺失
 
 ### v2.0.3 (2026-05-22)
 - ✅ 新增 #昨日发言榜 命令
