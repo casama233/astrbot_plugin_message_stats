@@ -63,7 +63,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.0.5")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.0.6")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -129,6 +129,30 @@ class MessageStatsPlugin(Star):
             self.page_chart,
             ["GET"],
             "群组发言趋势图表数据",
+        )
+        context.register_web_api(
+            "/astrbot_plugin_message_stats/fonts",
+            self.page_fonts,
+            ["GET"],
+            "字体管理数据",
+        )
+        context.register_web_api(
+            "/astrbot_plugin_message_stats/fonts/upload",
+            self.page_font_upload,
+            ["POST"],
+            "上传字体文件",
+        )
+        context.register_web_api(
+            "/astrbot_plugin_message_stats/fonts/select",
+            self.page_font_select,
+            ["POST"],
+            "选择字体文件",
+        )
+        context.register_web_api(
+            "/astrbot_plugin_message_stats/fonts/delete",
+            self.page_font_delete,
+            ["POST"],
+            "删除字体文件",
         )
 
         self.logger = logger
@@ -282,6 +306,89 @@ class MessageStatsPlugin(Star):
             return host and referer.split('://', 1)[-1].split('/', 1)[0] == host
         return bool(sec_fetch_site == 'none')
 
+    def _get_fonts_dir(self) -> Path:
+        return Path(StarTools.get_data_dir('message_stats')) / "resources" / "fonts"
+
+    def _get_legacy_fonts_dir(self) -> Path:
+        return Path(StarTools.get_data_dir("astrbot_plugin_message_stats")) / "resources" / "fonts"
+
+    def _sanitize_font_filename(self, filename: str) -> str:
+        name = Path(str(filename or "")).name.strip()
+        stem = Path(name).stem
+        suffix = Path(name).suffix.lower()
+        safe_stem = re.sub(r"[^0-9A-Za-z._\-一-鿿]+", "_", stem).strip("._-")
+        if not safe_stem:
+            safe_stem = "font"
+        return f"{safe_stem[:80]}{suffix}"
+
+    def _is_allowed_font_file(self, filename: str) -> bool:
+        return Path(str(filename or "")).suffix.lower() in {'.ttf', '.otf', '.woff', '.woff2', '.ttc'}
+
+    def _format_file_size(self, size: int) -> str:
+        if size < 1024 * 1024:
+            return f"{size / 1024:.1f}KB"
+        return f"{size / 1024 / 1024:.1f}MB"
+
+    def _get_font_config_path(self, filename: str) -> str:
+        return f"resources/fonts/{filename}"
+
+    def _attach_font_dirs(self, config: PluginConfig) -> PluginConfig:
+        config.font_base_dirs = [str(self._get_fonts_dir()), str(self._get_legacy_fonts_dir())]
+        return config
+
+    def _normalize_selected_font_name(self, font_path: str) -> str:
+        font_path = str(font_path or "").replace("\\", "/").strip()
+        if not font_path:
+            return ""
+        return Path(font_path).name
+
+    def _list_uploaded_fonts(self) -> List[Dict[str, Any]]:
+        current_font = self._normalize_selected_font_name(getattr(self.plugin_config, 'font_path', ''))
+        fonts = []
+        seen = set()
+        for fonts_dir in (self._get_fonts_dir(), self._get_legacy_fonts_dir()):
+            if not fonts_dir.exists():
+                continue
+            for font_file in sorted(fonts_dir.iterdir(), key=lambda p: p.name.lower()):
+                if font_file.name in seen or not font_file.is_file() or not self._is_allowed_font_file(font_file.name):
+                    continue
+                seen.add(font_file.name)
+                stat = font_file.stat()
+                fonts.append({
+                    "name": font_file.name,
+                    "path": self._get_font_config_path(font_file.name),
+                    "size": stat.st_size,
+                    "size_text": self._format_file_size(stat.st_size),
+                    "is_current": font_file.name == current_font
+                })
+        return fonts
+
+    async def _save_font_path_config(self, font_path: str):
+        font_path = str(font_path or "").strip()
+        if font_path:
+            font_name = self._sanitize_font_filename(self._normalize_selected_font_name(font_path))
+            if font_name:
+                font_path = self._get_font_config_path(font_name)
+        config = self._attach_font_dirs(self.plugin_config)
+        config.font_path = font_path
+        self.plugin_config = config
+        self.data_manager.set_plugin_config(config)
+        await self.data_manager.save_config(config)
+        if self.config is not None:
+            try:
+                if hasattr(self.config, '__setitem__'):
+                    self.config['font_path'] = font_path
+                if hasattr(self.config, 'save_config'):
+                    result = self.config.save_config()
+                    if hasattr(result, '__await__'):
+                        await result
+            except Exception as e:
+                self.logger.warning(f"保存AstrBot字体配置失败: {e}")
+        if self.image_generator:
+            self.image_generator.config = config
+            self.image_generator._font_css_cache_key = None
+            self.image_generator._font_css_cache_value = ""
+
     def _schedule_file_cleanup(self, file_path: str, delay_seconds: int = 300):
         if file_path:
             asyncio.create_task(self._cleanup_file_later(str(file_path), delay_seconds))
@@ -420,18 +527,18 @@ class MessageStatsPlugin(Star):
                 return self._jsonify({"status":"error","message":"group_id参数无效"})
             if not gid:
                 return self._jsonify({"status":"ok","data":{"days":[],"counts":[]}})
-            
+
             users = await self.data_manager.get_group_data(gid)
             if not users:
                 return self._jsonify({"status":"ok","data":{"days":[],"counts":[]}})
-            
+
             # 聚合所有用户每天的总发言数
             daily_totals = {}
             for u in users:
                 if hasattr(u, '_message_dates') and u._message_dates:
                     for date_str, count in u._message_dates.items():
                         daily_totals[date_str] = daily_totals.get(date_str, 0) + count
-            
+
             # 取最近7天
             today = date.today()
             days, counts = [], []
@@ -440,11 +547,146 @@ class MessageStatsPlugin(Star):
                 ds = str(d)
                 days.append(f"{d.month}/{d.day}")
                 counts.append(daily_totals.get(ds, 0))
-            
+
             return self._jsonify({"status":"ok","data":{"days":days,"counts":counts}})
         except Exception as e:
             self.logger.error(f"Web图表接口失败: {e}", exc_info=True)
             return self._jsonify({"status":"error","message":"获取图表数据失败"})
+
+    async def page_fonts(self):
+        try:
+            current_path = str(getattr(self.plugin_config, 'font_path', '') or '')
+            current_name = self._normalize_selected_font_name(current_path)
+            return self._jsonify({"status":"ok","data":{
+                "fonts": self._list_uploaded_fonts(),
+                "current_path": current_path,
+                "current_name": current_name
+            }})
+        except Exception as e:
+            self.logger.error(f"Web字体列表接口失败: {e}", exc_info=True)
+            return self._jsonify({"status":"error","message":"获取字体列表失败"})
+
+    async def page_font_upload(self):
+        try:
+            from quart import request
+            if not self._is_same_origin_request(request):
+                return self._jsonify({"status":"error","message":"请求来源无效"})
+
+            files = await request.files
+            file = files.get('font') if files else None
+            data = None
+            filename = ""
+            if file and getattr(file, 'filename', ''):
+                filename = file.filename
+                data = file.read()
+                if hasattr(data, '__await__'):
+                    data = await data
+            else:
+                payload = await request.get_json(silent=True)
+                if isinstance(payload, dict):
+                    import base64
+                    filename = str(payload.get('filename') or '')
+                    content = str(payload.get('content') or '')
+                    if ',' in content:
+                        content = content.split(',', 1)[1]
+                    try:
+                        data = base64.b64decode(content, validate=True)
+                    except Exception:
+                        return self._jsonify({"status":"error","message":"字体文件内容无效"})
+
+            if not filename:
+                return self._jsonify({"status":"error","message":"请选择字体文件"})
+            if not self._is_allowed_font_file(filename):
+                return self._jsonify({"status":"error","message":"仅支持 .ttf/.otf/.woff/.woff2/.ttc 字体文件"})
+            if not data:
+                return self._jsonify({"status":"error","message":"字体文件为空"})
+            max_size = 20 * 1024 * 1024
+            if len(data) > max_size:
+                return self._jsonify({"status":"error","message":"字体文件不能超过20MB"})
+
+            fonts_dir = self._get_fonts_dir()
+            fonts_dir.mkdir(parents=True, exist_ok=True)
+            safe_name = self._sanitize_font_filename(filename)
+            target = fonts_dir / safe_name
+            if target.exists():
+                digest = orjson.dumps({"name": safe_name, "size": len(data)}).hex()[:8]
+                target = fonts_dir / f"{Path(safe_name).stem}_{digest}{Path(safe_name).suffix}"
+
+            async with aiofiles.open(str(target), 'wb') as f:
+                await f.write(data)
+
+            font_path = self._get_font_config_path(target.name)
+            await self._save_font_path_config(font_path)
+            saved_path = str(getattr(self.plugin_config, 'font_path', '') or '')
+            self.logger.info(f"Web面板上传并启用自定义字体: {target.name}")
+            return self._jsonify({"status":"ok","message":"字体已上传并启用","data":{"font_path":saved_path,"name":target.name,"fonts":self._list_uploaded_fonts()}})
+        except Exception as e:
+            self.logger.error(f"Web字体上传接口失败: {e}", exc_info=True)
+            return self._jsonify({"status":"error","message":"上传字体失败"})
+
+    async def page_font_select(self):
+        try:
+            from quart import request
+            if not self._is_same_origin_request(request):
+                return self._jsonify({"status":"error","message":"请求来源无效"})
+
+            form = await request.form
+            font_path = form.get('font_path') if form else None
+            if font_path is None:
+                payload = await request.get_json(silent=True)
+                font_path = payload.get('font_path') if isinstance(payload, dict) else ''
+            font_path = str(font_path or '').strip()
+            if font_path:
+                font_name = self._sanitize_font_filename(self._normalize_selected_font_name(font_path))
+                if not self._is_allowed_font_file(font_name):
+                    return self._jsonify({"status":"error","message":"字体文件类型不支持"})
+                target = self._get_fonts_dir() / font_name
+                legacy_target = self._get_legacy_fonts_dir() / font_name
+                if not target.exists() and legacy_target.exists() and legacy_target.is_file():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(legacy_target.read_bytes())
+                if not target.exists() or not target.is_file():
+                    return self._jsonify({"status":"error","message":"字体文件不存在"})
+                font_path = self._get_font_config_path(font_name)
+
+            await self._save_font_path_config(font_path)
+            saved_path = str(getattr(self.plugin_config, 'font_path', '') or '')
+            self.logger.info(f"Web面板切换自定义字体: {saved_path or '默认字体'}")
+            return self._jsonify({"status":"ok","message":"字体设置已保存","data":{"font_path":saved_path,"fonts":self._list_uploaded_fonts()}})
+        except Exception as e:
+            self.logger.error(f"Web字体选择接口失败: {e}", exc_info=True)
+            return self._jsonify({"status":"error","message":"保存字体设置失败"})
+
+    async def page_font_delete(self):
+        try:
+            from quart import request
+            if not self._is_same_origin_request(request):
+                return self._jsonify({"status":"error","message":"请求来源无效"})
+
+            form = await request.form
+            font_path = form.get('font_path') if form else None
+            if font_path is None:
+                payload = await request.get_json(silent=True)
+                font_path = payload.get('font_path') if isinstance(payload, dict) else ''
+            font_name = self._sanitize_font_filename(self._normalize_selected_font_name(font_path))
+            if not font_name or not self._is_allowed_font_file(font_name):
+                return self._jsonify({"status":"error","message":"字体文件参数无效"})
+            target = self._get_fonts_dir() / font_name
+            legacy_target = self._get_legacy_fonts_dir() / font_name
+            if not target.exists() and legacy_target.exists() and legacy_target.is_file():
+                target = legacy_target
+            if not target.exists() or not target.is_file():
+                return self._jsonify({"status":"error","message":"字体文件不存在"})
+
+            target.unlink()
+            current_name = self._normalize_selected_font_name(getattr(self.plugin_config, 'font_path', ''))
+            if current_name == font_name:
+                await self._save_font_path_config("")
+            self.logger.info(f"Web面板删除自定义字体: {font_name}")
+            return self._jsonify({"status":"ok","message":"字体已删除","data":{"fonts":self._list_uploaded_fonts(),"current_path":getattr(self.plugin_config, 'font_path', '')}})
+        except Exception as e:
+            self.logger.error(f"Web字体删除接口失败: {e}", exc_info=True)
+            return self._jsonify({"status":"error","message":"删除字体失败"})
 
     def _convert_to_plugin_config(self) -> PluginConfig:
         """将AstrBot配置转换为插件配置对象"""
@@ -743,7 +985,7 @@ class MessageStatsPlugin(Star):
             None: 无返回值
         """
         # 更新插件配置（从AstrBot配置转换）
-        self.plugin_config = self._convert_to_plugin_config()
+        self.plugin_config = self._attach_font_dirs(self._convert_to_plugin_config())
         
         # 同步更新缓存 set
         self._milestone_set = set(self.plugin_config.milestone_targets)

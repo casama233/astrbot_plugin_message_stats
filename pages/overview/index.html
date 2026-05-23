@@ -29,6 +29,9 @@
   --ttbg: #EDE9FE;
   --sc: #3B82F6;
   --sb-w: 300px;
+  --r-card: 14px;
+  --r-item: 10px;
+  --r-pill: 8px;
 
 }
 html[data-theme=dark] {
@@ -87,19 +90,65 @@ html[data-theme=dark] .hd H1 {
   padding:8px 16px 6px; line-height:1.4
 }
 .sb .ul-wrap { flex:1; overflow-y:auto; padding:4px 8px }
+.fold-head {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:11px 14px; margin:8px 14px 6px; cursor:pointer;
+  font-size:16px; font-weight:750; color:var(--n); user-select:none;
+  border-radius:var(--r-item); background:rgba(255,255,255,0.58);
+  transition:background .25s,color .25s
+}
+.fold-head:first-of-type { margin-top:12px }
+.fold-head:not(.closed) { background:rgba(219,234,254,0.78); color:var(--tc) }
+html[data-theme=dark] .fold-head { background:rgba(255,255,255,0.06) }
+html[data-theme=dark] .fold-head:not(.closed) { background:rgba(96,165,250,0.16); color:var(--tc) }
+.fold-head .meta { font-size:12px; color:var(--c3); font-weight:750 }
+.fold-head .right { display:flex; align-items:center; gap:5px }
+.fold-head .arrow { color:var(--c3); font-size:12px; transition:transform .2s }
+.fold-head.closed .arrow { transform:rotate(-90deg) }
+.fold-body { overflow:hidden; transition:max-height .25s ease, opacity .2s ease }
+.fold-body.closed { max-height:0 !important; opacity:0 }
+.font-panel { padding:26px; min-height:100%; display:flex; flex-direction:column }
+.font-panel-head { text-align:center; padding:20px 0 28px }
+.font-panel-head h2 { font-size:24px; color:var(--n); margin:0 0 8px }
+.font-panel-head p { color:var(--c2); font-size:13px }
+.font-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px }
+.font-add {
+  min-height:110px; border:2px dashed var(--c3); border-radius:var(--r-card);
+  display:flex; align-items:center; justify-content:center; color:var(--c3);
+  font-size:36px; cursor:pointer; background:rgba(255,255,255,0.18)
+}
+.font-item { padding:16px; border:1px solid var(--l); border-radius:var(--r-card); background:rgba(255,255,255,0.45); box-shadow:var(--cs) }
+html[data-theme=dark] .font-item { background:rgba(255,255,255,0.08) }
+.font-item.cur { border-color:var(--tc); background:var(--tbg) }
+.font-name { font-size:16px; font-weight:750; color:var(--n); word-break:break-all; margin-bottom:6px }
+.font-meta { font-size:12px; color:var(--c3); margin:3px 0 12px }
+.font-msg { text-align:center; font-size:12px; color:var(--c2); min-height:20px; line-height:1.5 }
+.font-actions { display:flex; gap:8px; flex-wrap:wrap }
+.font-btn {
+  padding:7px 12px; border:none; border-radius:var(--r-pill); cursor:pointer;
+  background:var(--tbg); color:var(--tc); font-size:12px; font-weight:700
+}
+.font-btn.danger { background:var(--dbg); color:var(--dc) }
+#fontFile { display:none }
+.rank-section { flex:1; display:flex; flex-direction:column; min-height:0 }
 .sb li {
-  padding:14px 16px; flex-direction:column;
-  align-items:stretch; gap:6px; border-bottom:1px solid var(--l);
+  padding:12px 16px;
+  flex-direction:column; align-items:stretch; gap:5px;
+  border-bottom:1px solid var(--l);
   position:relative; overflow:hidden
 }
+.sb li[data-font-panel] { margin:0 14px }
+.sb .ul-wrap li { margin:0 6px }
 .sb li:last-child { border-bottom:none }
-.sb li:hover { transform:translateX(3px); border-radius:10px }
-.sb li .A { font-size:14px; position:relative; z-index:1 }
-.sb li .B { font-size:12px; position:relative; z-index:1 }
-.sb li.sel { background:var(--tbg); border-radius:10px }
+.sb li:hover { transform:translateX(2px); border-radius:var(--r-pill) }
+.sb li + li { margin-top:0 }
+.sb li .A { font-size:13px; position:relative; z-index:1 }
+.sb li .B { font-size:11px; position:relative; z-index:1 }
+.sb li.sel { background:rgba(219,234,254,0.78); border-radius:var(--r-item) }
+.sb li[data-font-panel].sel .A { color:var(--tc) }
 .sb li .spark {
   position:absolute; right:-6px; top:50%; transform:translateY(-50%);
-  width:130px; height:60px; pointer-events:none; z-index:0
+  width:105px; height:42px; pointer-events:none; z-index:0
 }
 .sb li .spark SVG { display:block; width:100%; height:100% }
 
@@ -117,27 +166,27 @@ html[data-theme=dark] .hd H1 {
   text-align:center; padding:40px; color:var(--c3); font-size:15px;
   background:var(--cb); backdrop-filter:blur(16px) saturate(140%);
   -webkit-backdrop-filter:blur(16px) saturate(140%);
-  border-radius:20px; box-shadow:var(--cs); border:1px solid var(--cb2)
+  border-radius:var(--r-card); box-shadow:var(--cs); border:1px solid var(--cb2)
 }
 .c {
   padding:0; background:var(--cb);
   backdrop-filter:blur(16px) saturate(140%);
   -webkit-backdrop-filter:blur(16px) saturate(140%);
-  border-radius:20px; margin:20px 0; box-shadow:var(--cs);
+  border-radius:var(--r-card); margin:20px 0; box-shadow:var(--cs);
   border:1px solid var(--cb2); overflow:hidden;
   transition:background .3s,border .3s,box-shadow .3s; position:relative
 }
 .c-top { position:absolute; top:10px; right:10px; z-index:1 }
 .del-corner {
   display:inline-flex; align-items:center; padding:8px 16px;
-  background:var(--dbg); color:var(--dc); border:none; border-radius:16px;
-  font-size:13px; outline:none; cursor:pointer; transition:all .3s;
+  background:var(--dbg); color:var(--dc); border:none; border-radius:var(--r-item);
+  font-size:12px; outline:none; cursor:pointer; transition:all .3s;
   line-height:1.4; white-space:nowrap
 }
 .del-corner:hover { background:rgba(248,113,113,0.25) }
 html[data-theme=dark] .del-corner:hover { background:rgba(248,113,113,0.3) }
 .gn {
-  text-align:center; padding:28px 20px 8px; font-size:20px;
+  text-align:center; padding:24px 20px 8px; font-size:18px;
   font-weight:700; color:var(--n); line-height:1.5; word-break:break-all
 }
 ul { list-style:none; padding:4px 0 }
@@ -146,7 +195,7 @@ li {
   border-bottom:1px solid var(--l); cursor:pointer; transition:all .3s ease
 }
 li:last-child { border-bottom:none }
-li:hover { background:var(--h); transform:translateX(5px); border-radius:16px }
+li:hover { background:var(--h); transform:translateX(3px); border-radius:var(--r-item) }
 li .l { flex:1; min-width:0 }
 li .A { font-size:18px; font-weight:600; color:var(--n); transition:color .3s }
 li .B { font-size:13px; color:var(--c2); margin:4px 0 0 }
@@ -156,7 +205,7 @@ li .B { font-size:13px; color:var(--c2); margin:4px 0 0 }
   border-bottom:1px solid var(--l); transition:all .3s ease
 }
 .ri:last-child { border-bottom:none }
-.ri:hover { background:var(--h); transform:translateX(5px); border-radius:16px }
+.ri:hover { background:var(--h); transform:translateX(3px); border-radius:var(--r-item) }
 .av {
   width:60px; height:60px; border-radius:50%; flex-shrink:0;
   display:flex; align-items:center; justify-content:center;
@@ -165,19 +214,19 @@ li .B { font-size:13px; color:var(--c2); margin:4px 0 0 }
   text-shadow:0 1px 3px rgba(0,0,0,.3); overflow:hidden
 }
 .ri2 { flex:1; min-width:0 }
-.ri2 .nn { font-size:20px; font-weight:600; color:var(--n); transition:color .3s }
+.ri2 .nn { font-size:18px; font-weight:600; color:var(--n); transition:color .3s }
 .ri2 .tt {
-  font-size:12px; color:var(--ttc); font-weight:700; margin:0 0 0 6px;
-  background:var(--ttbg); padding:0 6px; border-radius:6px; display:inline-block
+  font-size:11px; color:var(--ttc); font-weight:700; margin:0 0 0 6px;
+  background:var(--ttbg); padding:0 6px; border-radius:var(--r-pill); display:inline-block
 }
-.ri2 .dd { font-size:13px; color:var(--c2); margin:4px 0 0 }
+.ri2 .dd { font-size:12px; color:var(--c2); margin:4px 0 0 }
 .rs { text-align:right; flex-shrink:0; margin:0 0 0 20px }
-.rs .nn2 { font-size:24px; font-weight:700; color:var(--n2) }
-.rs .pp { font-size:15px; color:var(--p); font-weight:500; margin:4px 0 0 }
-.hi { text-align:center; padding:16px 16px 20px; border-bottom:1px solid var(--l) }
-.hi .X { font-size:36px; font-weight:700; color:var(--n2) }
-.hi .y { font-size:14px; color:var(--c2); margin:6px 0 0 }
-.hi .z { font-size:12px; color:var(--c3); margin:2px 0 0 }
+.rs .nn2 { font-size:22px; font-weight:700; color:var(--n2) }
+.rs .pp { font-size:14px; color:var(--p); font-weight:500; margin:4px 0 0 }
+.hi { text-align:center; padding:14px 16px 18px; border-bottom:1px solid var(--l) }
+.hi .X { font-size:32px; font-weight:700; color:var(--n2) }
+.hi .y { font-size:13px; color:var(--c2); margin:6px 0 0 }
+.hi .z { font-size:11px; color:var(--c3); margin:2px 0 0 }
 .ld { text-align:center; padding:80px 20px; color:var(--c3); font-size:16px }
 .em { text-align:center; padding:80px 20px; color:var(--c3) }
 .sb .ld { padding:40px 20px }
@@ -187,12 +236,12 @@ li .B { font-size:13px; color:var(--c2); margin:4px 0 0 }
 .dock {
   display:inline-flex; background:var(--cb);
   backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
-  border-radius:24px; padding:3px; gap:1px;
+  border-radius:14px; padding:2px; gap:1px;
   border:1px solid var(--cb2)
 }
 .dock-item {
-  padding:6px 20px; border-radius:20px; border:none;
-  font-size:13px; font-weight:500; cursor:pointer;
+  padding:4px 16px; border-radius:11px; border:none;
+  font-size:12px; font-weight:500; cursor:pointer;
   background:transparent; color:var(--c2);
   transition:all .25s ease; outline:none
 }
@@ -208,14 +257,14 @@ li .B { font-size:13px; color:var(--c2); margin:4px 0 0 }
 }
 #md_in {
   background:var(--cb); backdrop-filter:blur(16px);
-  border-radius:16px; padding:30px; max-width:400px; text-align:center;
+  border-radius:var(--r-card); padding:30px; max-width:400px; text-align:center;
   box-shadow:0 8px 40px rgba(0,0,0,.3); border:1px solid var(--cb2)
 }
-#md_msg { font-size:16px; font-weight:600; margin:0 0 20px; color:var(--n) }
+#md_msg { font-size:15px; font-weight:600; margin:0 0 20px; color:var(--n) }
 #md_btns { display:flex; gap:12px; justify-content:center }
 #md_btns button {
-  padding:8px 24px; border:none; border-radius:12px;
-  font-size:14px; cursor:pointer; outline:none
+  padding:8px 24px; border:none; border-radius:var(--r-pill);
+  font-size:13px; cursor:pointer; outline:none
 }
 @media(max-width:800px) {
   .mn { flex-direction:column; padding:12px 16px 24px; gap:12px }
@@ -223,6 +272,8 @@ li .B { font-size:13px; color:var(--c2); margin:4px 0 0 }
   .hd { padding:16px 16px 0 }
   .hd H1 { font-size:24px }
   .sb .ul-wrap { max-height:260px }
+  html, body { -webkit-tap-highlight-color: transparent }
+  li:hover,.ri:hover,.sb li:hover { transform:none }
   .gn { padding:50px 20px 8px }
   .sb li .spark { width:80px; height:40px }
 }
@@ -279,9 +330,13 @@ li .B { font-size:13px; color:var(--c2); margin:4px 0 0 }
 <div class="mn">
   <div class="sb" id="sidebar">
     <div class="c">
-      <h2>选择群组</h2>
-      <div class="sb-hint">💡 群名称会在触发发言榜后更新</div>
-      <div class="ul-wrap"><ul id="gl"></ul></div>
+      <h2>选择范围</h2>
+      <div class="fold-head" data-fold="font"><span>字体设置</span><span class="right"><span class="meta" id="fontFoldMeta">默认</span><span class="arrow">▾</span></span></div>
+      <div class="fold-body" id="fontFold"><ul><li data-font-panel><div class="l"><div class="A">字体管理</div><div class="B" id="fontCurrent">当前：主题默认字体</div></div></li></ul></div>
+      <div class="fold-head" data-fold="rank"><span>排行榜</span><span class="right"><span class="meta" id="rankFoldMeta">0 个群组</span><span class="arrow">▾</span></span></div>
+      <div class="fold-body rank-section" id="rankFold">
+        <div class="ul-wrap"><ul id="gl"></ul></div>
+      </div>
     </div>
   </div>
   <div class="ct" id="content">
@@ -320,7 +375,10 @@ if (!B) {
   const MD_MSG = document.getElementById('md_msg');
   const MD_YES = document.getElementById('md_yes');
   const MD_NO = document.getElementById('md_no');
-  let MD_CB = null, GD = [], SEL = null, RANK_MODE = 'total';
+  const FONT_CURRENT = document.getElementById('fontCurrent');
+  const FONT_FOLD_META = document.getElementById('fontFoldMeta');
+  const RANK_FOLD_META = document.getElementById('rankFoldMeta');
+  let MD_CB = null, GD = [], SEL = null, RANK_MODE = 'total', FONT_DATA = { fonts: [], current_name: '' };
 
 
   MD_YES.onclick = function() { MD.style.display = 'none'; if (MD_CB) MD_CB(); };
@@ -328,6 +386,116 @@ if (!B) {
   MD.onclick = function(e) { if (e.target === MD) MD.style.display = 'none'; };
 
   function F(r) { return r && r.data ? r.data : r; }
+  function showMsg(msg) {
+    let el = document.getElementById('fontMsg');
+    if (el) el.textContent = msg || '';
+  }
+  function postFontApi(path, payload) {
+    if (B.apiPost) return B.apiPost(path, payload || {});
+    return fetch(path, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(payload || {}) }).then(function(r) { return r.json(); });
+  }
+  function uploadFont(file) {
+    return new Promise(function(resolve, reject) {
+      const reader = new FileReader();
+      reader.onload = function() { postFontApi('fonts/upload', { filename:file.name, content:String(reader.result || '') }).then(resolve).catch(reject); };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+  function bindFoldHeaders() {
+    document.querySelectorAll('.fold-head').forEach(function(h) {
+      h.onclick = function() {
+        const body = document.getElementById(this.dataset.fold + 'Fold');
+        if (!body) return;
+        const closed = body.classList.toggle('closed');
+        this.classList.toggle('closed', closed);
+      };
+    });
+  }
+  function openFontPanel() {
+    SEL = '__fonts__';
+    renderSidebar();
+    renderFontSidebar();
+    renderFontPanel(true);
+  }
+  function renderFontPanel(animated) {
+    const fonts = FONT_DATA.fonts || [], current = FONT_DATA.current_name || '';
+    let h = '<div class="c"><div class="font-panel">'
+      + '<div class="font-panel-head"><h2>字体管理</h2><p>' + (current ? '当前使用：' + current : '当前使用：主题默认字体') + '</p></div>'
+      + '<input id="fontFile" type="file" accept=".ttf,.otf,.woff,.woff2,.ttc">'
+      + '<div class="font-actions" style="justify-content:center;margin-bottom:24px"><button class="font-btn" id="fontUploadBtn">上传字体</button><button class="font-btn" id="fontDefaultBtn">恢复默认</button></div>'
+      + '<div class="font-msg" id="fontMsg"></div><div class="font-grid">';
+    fonts.forEach(function(f) {
+      h += '<div class="font-item' + (f.is_current ? ' cur' : '') + '">'
+        + '<div class="font-name">' + f.name + '</div>'
+        + '<div class="font-meta">' + (f.size_text || '') + (f.is_current ? ' · 使用中' : '') + '</div>'
+        + '<div class="font-actions"><button class="font-btn use-font" data-path="' + f.path + '">使用</button><button class="font-btn danger del-font" data-path="' + f.path + '">删除</button></div></div>';
+    });
+    h += '<div class="font-add" id="fontAdd">+</div></div></div></div>';
+    CT.innerHTML = h;
+    if (animated) CT.classList.add('enter'); else CT.classList.remove('enter');
+    const fileInput = document.getElementById('fontFile');
+    const uploadBtn = document.getElementById('fontUploadBtn');
+    const addBtn = document.getElementById('fontAdd');
+    const defaultBtn = document.getElementById('fontDefaultBtn');
+    function chooseFile() { fileInput.click(); }
+    uploadBtn.onclick = chooseFile;
+    addBtn.onclick = chooseFile;
+    defaultBtn.onclick = function() {
+      showMsg('保存中...');
+      postFontApi('fonts/select', { font_path:'' }).then(function(r) {
+        showMsg(r && r.status === 'error' ? r.message : '已恢复默认字体');
+        loadFonts(function() { renderFontPanel(false); });
+      }).catch(function() { showMsg('恢复默认失败'); });
+    };
+    fileInput.onchange = function() {
+      const file = this.files && this.files[0];
+      if (!file) return;
+      showMsg('上传中...');
+      uploadFont(file).then(function(r) {
+        showMsg(r && r.status === 'error' ? r.message : '字体已上传并启用');
+        fileInput.value = '';
+        loadFonts(function() { renderFontPanel(false); });
+      }).catch(function() { showMsg('上传失败'); fileInput.value = ''; });
+    };
+    document.querySelectorAll('.use-font').forEach(function(btn) {
+      btn.onclick = function() {
+        showMsg('保存中...');
+        postFontApi('fonts/select', { font_path:this.dataset.path }).then(function(r) {
+          showMsg(r && r.status === 'error' ? r.message : '已切换字体');
+          loadFonts(function() { renderFontPanel(false); });
+        }).catch(function() { showMsg('切换失败'); });
+      };
+    });
+    document.querySelectorAll('.del-font').forEach(function(btn) {
+      btn.onclick = function() {
+        showMsg('删除中...');
+        postFontApi('fonts/delete', { font_path:this.dataset.path }).then(function(r) {
+          showMsg(r && r.status === 'error' ? r.message : '已删除字体');
+          loadFonts(function() { renderFontPanel(false); });
+        }).catch(function() { showMsg('删除失败'); });
+      };
+    });
+  }
+  function renderFontSidebar() {
+    const current = FONT_DATA.current_name || '';
+    FONT_CURRENT.textContent = current ? '当前：' + current : '当前：主题默认字体';
+    FONT_FOLD_META.textContent = (FONT_DATA.fonts || []).length + ' 个字体';
+    const el = document.querySelector('li[data-font-panel]');
+    if (el) el.classList.toggle('sel', SEL === '__fonts__');
+  }
+  function loadFonts(callback) {
+    B.apiGet('fonts').then(function(r) {
+      FONT_DATA = F(r) || { fonts: [], current_name: '' };
+      renderFontSidebar();
+      if (callback) callback();
+    }).catch(function() {
+      FONT_CURRENT.textContent = '字体列表加载失败';
+      if (callback) callback();
+    });
+  }
+  bindFoldHeaders();
+  document.querySelector('li[data-font-panel]').onclick = openFontPanel;
 
   const pal = ['#F59E0B','#3B82F6','#8B5CF6','#EC4899','#10B981','#EF4444','#14B8A6','#F97316','#6366F1','#84CC16','#06B6D4','#D946EF','#0EA5E9','#EAB308','#A855F7'];
   function getColor(s) {
@@ -419,8 +587,11 @@ if (!B) {
   function renderSidebar() {
     let h = '';
     if (!GD || !GD.length) {
-      GL.innerHTML = '<li style="cursor:default;color:var(--c3);justify-content:center;padding:40px 14px;border:none">暂无群组数据</li>'; return;
+      GL.innerHTML = '<li style="cursor:default;color:var(--c3);justify-content:center;padding:40px 14px;border:none">暂无群组数据</li>';
+      RANK_FOLD_META.textContent = '0 个群组';
+      return;
     }
+    RANK_FOLD_META.textContent = GD.length + ' 个群组';
     GD.forEach(function(x) {
       const dn = x.display_name || x.group_name || '群' + x.group_id;
       const un = x.user_count || 0, tm = x.total_messages || 0, sel = SEL === x.group_id ? ' sel' : '';
@@ -432,6 +603,7 @@ if (!B) {
   }
 
   function renderDetail(animated) {
+    if (SEL === '__fonts__') { renderFontPanel(animated); return; }
     const g = GD.find(function(x) { return x.group_id === SEL; });
     if (!g) { CT.innerHTML = '<div class="emp">👈 从左侧选择一个群组查看详情</div>'; return; }
     const u = g.top_users || [], dn = g.display_name || g.group_name || '群' + g.group_id;
@@ -537,6 +709,7 @@ if (!B) {
         });
         Promise.all(sparkPromises).then(function() {
           renderSidebar();
+          if (SEL === '__fonts__') { openFontPanel(); return; }
           if (SEL) { var still = GD.find(function(x) { return x.group_id === SEL; }); if (!still) { SEL = null; renderDetail(true); } else { enterGroup(SEL); } }
           else if (GD.length && !SEL) { SEL = GD[0].group_id; renderSidebar(); enterGroup(SEL); }
         });
@@ -546,7 +719,8 @@ if (!B) {
 
 
   function enterGroup(id) {
-    SEL = id; renderSidebar();
+    if (id === '__fonts__') { openFontPanel(); return; }
+    SEL = id; renderSidebar(); renderFontSidebar();
     CT.innerHTML = '<div class="ld">加载中...</div>';
     B.apiGet('stats', { group_id: id, rank_type: RANK_MODE }).then(function(r) {
       const d = F(r), ng = d && d.group ? d.group : null;
@@ -558,6 +732,7 @@ if (!B) {
   }
 
   window.enterGroup = enterGroup;
+  loadFonts();
   loadGroups();
 }
 </script>

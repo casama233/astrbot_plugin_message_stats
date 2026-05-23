@@ -367,21 +367,39 @@ class ImageGenerator:
         if raw_path.is_absolute():
             candidates.append(raw_path)
         else:
+            plugin_dir = Path(__file__).parent.parent
             candidates.extend([
-                Path(__file__).parent.parent / raw_path,
-                Path(__file__).parent.parent / "fonts" / raw_path.name,
+                plugin_dir / raw_path,
+                plugin_dir / "fonts" / raw_path.name,
             ])
+            font_base_dirs = getattr(self.config, 'font_base_dirs', []) or []
+            for base_dir in font_base_dirs:
+                base_path = Path(str(base_dir))
+                candidates.extend([
+                    base_path / raw_path,
+                    base_path / raw_path.name,
+                ])
             try:
-                data_dir = StarTools.get_data_dir("astrbot_plugin_message_stats")
-                candidates.append(Path(data_dir) / "resources" / "fonts" / raw_path.name)
+                data_dir = Path(StarTools.get_data_dir('message_stats'))
+                legacy_data_dir = Path(StarTools.get_data_dir("astrbot_plugin_message_stats"))
+                candidates.extend([
+                    data_dir / raw_path,
+                    data_dir / "resources" / "fonts" / raw_path.name,
+                    legacy_data_dir / raw_path,
+                    legacy_data_dir / "resources" / "fonts" / raw_path.name,
+                ])
             except Exception:
                 pass
 
+        checked = []
         for candidate in candidates:
+            checked.append(str(candidate))
             if candidate.exists() and candidate.is_file():
-                return candidate.resolve()
+                resolved = candidate.resolve()
+                self.logger.info(f"自定义字体文件解析成功: {resolved}")
+                return resolved
 
-        self.logger.warning(f"自定义字体文件不存在，使用主题默认字体: {font_path}")
+        self.logger.warning(f"自定义字体文件不存在，使用主题默认字体: {font_path}; 已检查: {' | '.join(checked)}")
         return None
 
     def _get_font_format(self, font_path: Path) -> str:
@@ -432,11 +450,18 @@ class ImageGenerator:
             f"src: url(\"data:{mime_type};base64,{font_data}\") format('{font_format}'); "
             "font-weight: 100 900; font-style: normal; font-display: block; "
             "}\n"
-            ":root { --message-stats-font-family: 'MessageStatsCustomFont'; }"
+            ":root { --message-stats-font-family: 'MessageStatsCustomFont', 'Microsoft YaHei', 'Segoe UI', sans-serif; }\n"
+            "body, body * { font-family: var(--message-stats-font-family) !important; }"
         )
+        self.logger.info(f"自定义字体文件已读取，准备注入CSS: {font_path}")
         self._font_css_cache_key = cache_key
         self._font_css_cache_value = css
         return css
+
+    async def _apply_custom_font(self, page: Page):
+        css = self._get_custom_font_css()
+        if css:
+            await page.add_style_tag(content=css)
 
     async def _wait_for_assets(self, page: Page):
         await page.evaluate("""
@@ -724,6 +749,7 @@ class ImageGenerator:
                 
             # 设置页面内容（使用 load 而非 networkidle，避免外部资源加载超时）
             await page.set_content(html_content, wait_until="load")
+            await self._apply_custom_font(page)
             await self._wait_for_assets(page)
 
             # 动态调整页面高度和宽度，确保边距一致
@@ -840,6 +866,7 @@ class ImageGenerator:
             
             # 将HTML内容设置到页面
             await page.set_content(html_content, wait_until='networkidle')
+            await self._apply_custom_font(page)
             await self._wait_for_assets(page)
 
             # 动态调整高度以适应内容，但不小于最小高度
@@ -962,6 +989,7 @@ class ImageGenerator:
             
             # 设置页面内容
             await page.set_content(html_content, wait_until="load")
+            await self._apply_custom_font(page)
             await self._wait_for_assets(page)
 
             # 动态调整页面高度
@@ -1749,7 +1777,7 @@ class ImageGenerator:
             box-sizing: border-box;
         }
         body {
-            font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+            font-family: var(--message-stats-font-family, 'Microsoft YaHei', 'Segoe UI', sans-serif);
             background: linear-gradient(135deg, #E9EFF6 0%, #D6E4F0 100%);
             padding: 30px;
             min-height: 100vh;
@@ -1941,7 +1969,7 @@ class ImageGenerator:
             box-sizing: border-box;
         }
         body {
-            font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+            font-family: var(--message-stats-font-family, 'Microsoft YaHei', 'Segoe UI', sans-serif);
             background: linear-gradient(135deg, #E9EFF6 0%, #D6E4F0 100%);
             padding: 30px;
             min-height: 100vh;

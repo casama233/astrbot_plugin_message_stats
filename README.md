@@ -124,11 +124,13 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 
 ### 自定义字体
 
-在 Web 面板的 `font_path` 中填写字体文件路径即可让排行榜、个人统计卡片和里程碑卡片优先使用该字体。支持 `.ttf`、`.otf`、`.woff`、`.woff2` 字体文件。
+在 Web 面板的 `font_path` 中填写字体文件路径即可让排行榜、个人统计卡片和里程碑卡片优先使用该字体。支持 `.ttf`、`.otf`、`.woff`、`.woff2`、`.ttc` 字体文件。
 
 - 留空：使用当前主题模板的默认字体。
+- Pages 上传：在发言统计面板的“字体管理”中上传字体后会自动启用，并同步写入 `font_path`，Web 配置面板也能看到当前路径。
 - 绝对路径：例如 `C:\\Windows\\Fonts\\msyh.ttc`。
 - 相对路径：相对插件目录查找，也会尝试插件目录下的 `fonts/` 和插件数据目录下的 `resources/fonts/`。
+- Pages 管理：可在面板中选择已上传字体、删除字体或恢复默认；删除当前使用字体时会自动回退默认字体。
 - 路径无效或读取失败：记录 warning 后自动回退默认字体，不影响图片生成。
 - 字体文件修改后会根据路径、修改时间和文件大小自动刷新缓存。
 
@@ -175,6 +177,10 @@ astrbot_plugin_message_stats/
 - **飞书（Lark/Feishu）** - 完整功能支持
 
 ## 📝 更新日志
+
+### v2.0.6 (2026-05-23)
+- ✅ Pages 面板新增字体上传、选择、删除和恢复默认
+- ✅ Pages 字体选择与 Web 配置 `font_path` 同步
 
 ### v2.0.5 (2026-05-23)
 - ✅ 新增自定义字体配置（font_path）

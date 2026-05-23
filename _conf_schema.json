@@ -33,7 +33,7 @@
   "font_path": {
     "type": "string",
     "description": "自定义字体路径",
-    "hint": "生成图片时使用的字体文件路径，支持绝对路径或相对路径，留空使用主题默认字体",
+    "hint": "生成图片时使用的字体文件路径；也可在插件 Pages 页面上传并选择字体（会写入 message_stats 数据目录下的 resources/fonts/文件名），留空使用主题默认字体",
     "default": ""
   },
   "detailed_logging_enabled": {
