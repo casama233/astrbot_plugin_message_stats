@@ -63,7 +63,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.0.3")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.0.4")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -1672,35 +1672,41 @@ class MessageStatsPlugin(Star):
 
     async def _get_group_name(self, event: Optional[AstrMessageEvent], group_id: str) -> str:
         """获取群名称（跨平台通用）
-        
+
         使用 PlatformHelper 统一获取群组名称，支持所有平台。
         当 event 为 None 时（如定时推送场景），跳过事件对象获取，直接使用 API 或默认名称。
-        
+
         Args:
             event: 消息事件对象（可能为 None，如定时推送场景）
             group_id: 群组ID
-            
+
         Returns:
             群组名称，如果获取失败则返回 "群{group_id}"
         """
+        group_id_str = str(group_id)
         try:
             # 首先尝试通过事件对象获取群组信息（仅在 event 不为 None 时）
             if event is not None:
                 group_data = await event.get_group(group_id)
                 if group_data:
                     # 简化群名获取逻辑，直接尝试常用属性
-                    return getattr(group_data, 'group_name', None) or \
-                           getattr(group_data, 'name', None) or \
-                           getattr(group_data, 'title', None) or \
-                           getattr(group_data, 'group_title', None) or \
-                           f"群{group_id}"
-            
+                    group_name = getattr(group_data, 'group_name', None) or \
+                                 getattr(group_data, 'name', None) or \
+                                 getattr(group_data, 'title', None) or \
+                                 getattr(group_data, 'group_title', None)
+                    if group_name:
+                        return str(group_name).strip()
+
+            cached_group_name = self._web_group_name_cache.get(group_id_str)
+            if cached_group_name:
+                return str(cached_group_name).strip()
+
             # 如果事件对象获取失败或 event 为 None，使用 PlatformHelper 统一通过API获取（跨平台通用）
             helper = PlatformHelper(event, self.context)
             group_name = await helper.get_group_name(group_id)
             if group_name:
                 return str(group_name).strip()
-            
+
             return f"群{group_id}"
         except (AttributeError, KeyError, TypeError, OSError) as e:
             self.logger.warning(f"获取群名称失败，使用默认名称: {e}")
