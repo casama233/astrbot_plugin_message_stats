@@ -391,7 +391,12 @@
             {% if group_name %}
             <div class="group-info">✏️ {{ group_name }} · {{ group_id }}</div>
             {% endif %}
+            {% if ']' in title %}
+            {% set title_parts = title.split(']', 1) %}
+            <div class="title">{{ title_parts[0] }}]<br>{{ title_parts[1] }}</div>
+            {% else %}
             <div class="title">{{ title }}</div>
+            {% endif %}
             <div class="stats-row">
                 <div class="stat-item">
                     <div class="stat-value">{{ total_messages }}</div>
