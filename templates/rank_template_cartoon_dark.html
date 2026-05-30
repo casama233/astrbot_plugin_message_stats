@@ -71,6 +71,11 @@
             transform: rotate(20deg);
         }
 
+        .group-info-row {
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
         .group-info {
             font-size: 14px;
             color: #bcaaa4;
@@ -389,7 +394,7 @@
         <!-- Header -->
         <div class="header">
             {% if group_name %}
-            <div class="group-info">✏️ {{ group_name }} · {{ group_id }}</div>
+            <div class="group-info-row"><div class="group-info">✏️ {{ group_name }} · {{ group_id }}</div></div>
             {% endif %}
             {% if ']' in title %}
             {% set title_parts = title.split(']', 1) %}

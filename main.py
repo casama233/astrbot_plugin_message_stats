@@ -600,9 +600,9 @@ class MessageStatsPlugin(Star):
                 return self._jsonify({"status":"error","message":"仅支持 .ttf/.otf/.woff/.woff2/.ttc 字体文件"})
             if not data:
                 return self._jsonify({"status":"error","message":"字体文件为空"})
-            max_size = 20 * 1024 * 1024
+            max_size = 50 * 1024 * 1024
             if len(data) > max_size:
-                return self._jsonify({"status":"error","message":"字体文件不能超过20MB"})
+                return self._jsonify({"status":"error","message":"字体文件不能超过50MB"})
 
             fonts_dir = self._get_fonts_dir()
             fonts_dir.mkdir(parents=True, exist_ok=True)
