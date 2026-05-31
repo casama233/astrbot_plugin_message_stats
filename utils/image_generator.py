@@ -331,7 +331,7 @@ class ImageGenerator:
             self.logger.warning("Jinja2不可用，将使用不安全的字符串拼接")
     
     async def _preload_templates(self):
-        """预加载模板文件到缓存"""
+        """预加载模板文件到缓存（使用模板路径区分的缓存键）"""
         try:
             if os.path.exists(self.template_path):
                 # 使用异步文件读取优化
@@ -340,14 +340,15 @@ class ImageGenerator:
                 
                 # 缓存模板内容
                 template_hash = self._get_template_hash(template_content)
+                cache_key = self._get_template_cache_key()
                 async with self._cache_lock:
-                    self._template_cache['main_template'] = {
+                    self._template_cache[cache_key] = {
                         'content': template_content,
                         'hash': template_hash,
                         'template': self.jinja_env.from_string(template_content) if self.jinja_env else None
                     }
                 
-                self.logger.info(f"模板预加载完成，缓存键: main_template")
+                self.logger.info(f"模板预加载完成，缓存键: {cache_key}")
             else:
                 self.logger.warning(f"模板文件不存在: {self.template_path}")
         except Exception as e:
@@ -356,6 +357,10 @@ class ImageGenerator:
     def _get_template_hash(self, content: str) -> str:
         """获取模板内容的哈希值，用于缓存验证"""
         return hashlib.md5(content.encode('utf-8')).hexdigest()
+
+    def _get_template_cache_key(self) -> str:
+        """获取基于当前模板路径的缓存键，确保不同主题模板各自独立缓存"""
+        return f"main_template:{self.template_path.stem}"
 
     def _resolve_font_path(self) -> Optional[Path]:
         font_path = str(getattr(self.config, 'font_path', '') or '').strip()
@@ -481,9 +486,10 @@ class ImageGenerator:
         """)
 
     async def _get_cached_template(self) -> Optional[Union[str, Template]]:
-        """获取缓存的模板"""
+        """获取缓存的模板（使用模板路径区分的缓存键，确保深浅色主题独立缓存）"""
+        cache_key = self._get_template_cache_key()
         async with self._cache_lock:
-            cached = self._template_cache.get('main_template')
+            cached = self._template_cache.get(cache_key)
             if cached:
                 self._cache_hits += 1
                 return cached.get('template') if self.jinja_env else cached.get('content')
@@ -492,11 +498,12 @@ class ImageGenerator:
                 return None
     
     async def _update_template_cache(self, content: str):
-        """更新模板缓存"""
+        """更新模板缓存（使用模板路径区分的缓存键）"""
         try:
             template_hash = self._get_template_hash(content)
+            cache_key = self._get_template_cache_key()
             async with self._cache_lock:
-                self._template_cache['main_template'] = {
+                self._template_cache[cache_key] = {
                     'content': content,
                     'hash': template_hash,
                     'template': self.jinja_env.from_string(content) if self.jinja_env else None
