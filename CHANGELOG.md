@@ -1,6 +1,6 @@
 # 更新日志
 
-## v2.0.8 (2026-06-01)
+## v2.0.9 (2026-06-01)
 
 ### 🐛 Bug 修复
 - **修复指令触发后额外调用 LLM 浪费 Tokens**（#38）：插件注册了 `EventMessageType.ALL` 全量监听器会使每条消息 `is_wake=True`，导致 `今日发言榜` 等指令推送榜单后，框架仍会默认再调用一次 LLM 进行 AI 回复（napcat/aiocqhttp 平台尤为明显）。已修复：在全部 16 个指令 handler 入口处调用 `event.should_call_llm(False)`，屏蔽框架默认的 LLM 回复；该调用不影响插件自身用于生成头衔的 LLM 请求。
