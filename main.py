@@ -1419,9 +1419,12 @@ class MessageStatsPlugin(Star):
     @filter.command("发言榜里程碑", alias={'发言里程碑'})
     async def show_my_milestone(self, event: AstrMessageEvent):
         """显示个人里程碑成就卡片，别名：发言里程碑"""
+        # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+        event.should_call_llm(False)
+
         group_id = event.get_group_id()
         user_id = event.get_sender_id()
-        
+
         if not group_id or not user_id:
             yield event.plain_result("无法获取群组或用户信息,请在群聊中使用此命令！")
             return
@@ -1567,11 +1570,14 @@ class MessageStatsPlugin(Star):
     @filter.command("查看发言", alias={'查询发言', '我的发言'})
     async def show_personal_stats(self, event: AstrMessageEvent, target_user: str = ""):
         """显示个人发言统计，支持查询他人(带@或填ID)"""
+        # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+        event.should_call_llm(False)
+
         group_id = event.get_group_id()
         if not group_id:
             yield event.plain_result("无法获取群组信息,请在群聊中使用此命令！")
             return
-            
+
         group_id = str(group_id)
         target_uid = str(event.get_sender_id())
         
@@ -1689,6 +1695,8 @@ class MessageStatsPlugin(Star):
     async def set_rank_count(self, event: AstrMessageEvent):
         """设置排行榜显示人数"""
         try:
+            # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+            event.should_call_llm(False)
             # 获取群组ID
             group_id = event.get_group_id()
             if not group_id:
@@ -1737,6 +1745,8 @@ class MessageStatsPlugin(Star):
         返回相应的设置成功提示信息。
         """
         try:
+            # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+            event.should_call_llm(False)
             # 获取群组ID
             group_id = event.get_group_id()
             if not group_id:
@@ -1780,6 +1790,8 @@ class MessageStatsPlugin(Star):
     async def clear_message_ranking(self, event: AstrMessageEvent):
         """清除发言榜单"""
         try:
+            # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+            event.should_call_llm(False)
             group_id = event.get_group_id()
             if not group_id:
                 yield event.plain_result("无法获取群组信息,请在群聊中使用此命令！")
@@ -1802,6 +1814,8 @@ class MessageStatsPlugin(Star):
     async def refresh_group_members_cache(self, event: AstrMessageEvent):
         """刷新群成员列表缓存"""
         try:
+            # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+            event.should_call_llm(False)
             group_id = event.get_group_id()
             if not group_id:
                 yield event.plain_result("无法获取群组信息,请在群聊中使用此命令！")
@@ -1824,6 +1838,8 @@ class MessageStatsPlugin(Star):
     async def show_cache_status(self, event: AstrMessageEvent):
         """显示缓存状态"""
         try:
+            # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+            event.should_call_llm(False)
             # 获取数据管理器缓存统计
             cache_stats = await self.data_manager.get_cache_stats()
             
@@ -1957,6 +1973,10 @@ class MessageStatsPlugin(Star):
     async def _show_rank(self, event: AstrMessageEvent, rank_type: RankType):
         """显示排行榜 - 重构版本"""
         try:
+            # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+            # 插件注册了全量消息监听器会使 is_wake=True，导致指令处理完仍触发默认 LLM
+            event.should_call_llm(False)
+
             # 检查群聊是否在屏蔽列表中
             group_id = event.get_group_id()
             if group_id and self._is_blocked_group(str(group_id)):
@@ -2493,6 +2513,8 @@ class MessageStatsPlugin(Star):
     async def timer_status(self, event: AstrMessageEvent):
         """查看定时任务状态"""
         try:
+            # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+            event.should_call_llm(False)
             # 获取当前配置（使用转换后的配置）
             config = self.plugin_config
             
@@ -2558,6 +2580,8 @@ class MessageStatsPlugin(Star):
     async def manual_push(self, event: AstrMessageEvent):
         """手动推送排行榜"""
         try:
+            # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+            event.should_call_llm(False)
             if not self.timer_manager:
                 yield event.plain_result("定时管理器未初始化，无法执行手动推送！")
                 return
@@ -2596,6 +2620,8 @@ class MessageStatsPlugin(Star):
         自动设置当前群组为定时群组并启用定时功能
         """
         try:
+            # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+            event.should_call_llm(False)
             # 获取参数
             args = event.message_str.split()[1:] if hasattr(event, 'message_str') else []
             
@@ -2659,6 +2685,8 @@ class MessageStatsPlugin(Star):
     async def set_timer_groups(self, event: AstrMessageEvent):
         """设置定时推送目标群组"""
         try:
+            # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+            event.should_call_llm(False)
             # 获取参数
             args = event.message_str.split()[1:] if hasattr(event, 'message_str') else []
             
@@ -2692,6 +2720,8 @@ class MessageStatsPlugin(Star):
     async def remove_timer_groups(self, event: AstrMessageEvent):
         """删除定时推送目标群组"""
         try:
+            # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+            event.should_call_llm(False)
             # 获取参数
             args = event.message_str.split()[1:] if hasattr(event, 'message_str') else []
             
@@ -2744,6 +2774,8 @@ class MessageStatsPlugin(Star):
     async def enable_timer(self, event: AstrMessageEvent):
         """启用定时推送功能"""
         try:
+            # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+            event.should_call_llm(False)
             # 获取当前配置（使用转换后的配置）
             config = self.plugin_config
             
@@ -2773,6 +2805,8 @@ class MessageStatsPlugin(Star):
     async def disable_timer(self, event: AstrMessageEvent):
         """禁用定时推送功能"""
         try:
+            # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+            event.should_call_llm(False)
             # 获取当前配置（使用转换后的配置）
             config = self.plugin_config
             
@@ -2791,6 +2825,8 @@ class MessageStatsPlugin(Star):
     async def set_timer_type(self, event: AstrMessageEvent):
         """设置定时推送的排行榜类型"""
         try:
+            # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+            event.should_call_llm(False)
             # 获取参数
             args = event.message_str.split()[1:] if hasattr(event, 'message_str') else []
             
