@@ -63,7 +63,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.0.9")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.1.0")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -1157,7 +1157,11 @@ class MessageStatsPlugin(Star):
         # 跳过命令消息
         message_str = getattr(event, 'message_str', '')
         if message_str and message_str.startswith(('%', '/')):
-
+            # 命令消息只交给 command handler 处理；同时关闭默认 LLM 回复，避免全量监听器让 is_wake=True
+            try:
+                event.should_call_llm(False)
+            except Exception:
+                pass
             return
         
         # 获取基本信息
@@ -1414,8 +1418,26 @@ class MessageStatsPlugin(Star):
         except Exception as e:
             self.logger.error(f"里程碑推送失败: {e}", exc_info=True)
     
+    def _stop_command_event(self, event: AstrMessageEvent):
+        """阻止命令消息继续进入默认 LLM 回复流程。"""
+        try:
+            event.should_call_llm(False)
+        except Exception:
+            pass
+
+        stop_event = getattr(event, 'stop_event', None)
+        if callable(stop_event):
+            return stop_event()
+        return None
+
+    async def _yield_stop_command_event(self, event: AstrMessageEvent):
+        """生成 stop_event 结果，兼容旧版 AstrBot 没有 stop_event 的情况。"""
+        stop_result = self._stop_command_event(event)
+        if stop_result is not None:
+            yield stop_result
+
     # ========== 排行榜命令 ==========
-    
+
     @filter.command("发言榜里程碑", alias={'发言里程碑'})
     async def show_my_milestone(self, event: AstrMessageEvent):
         """显示个人里程碑成就卡片，别名：发言里程碑"""
@@ -1530,11 +1552,15 @@ class MessageStatsPlugin(Star):
         """显示总排行榜，别名：水群榜/B话榜/发言排行/发言统计"""
         async for result in self._show_rank(event, RankType.TOTAL):
             yield result
+        async for result in self._yield_stop_command_event(event):
+            yield result
     
     @filter.command("今日发言榜", alias={'今日水群榜', '今日发言排行', '今日B话榜'})
     async def show_daily_rank(self, event: AstrMessageEvent):
         """显示今日排行榜，别名：今日水群榜/今日发言排行/今日B话榜"""
         async for result in self._show_rank(event, RankType.DAILY):
+            yield result
+        async for result in self._yield_stop_command_event(event):
             yield result
     
     @filter.command("本周发言榜", alias={'本周水群榜', '本周发言排行', '本周B话榜'})
@@ -1542,11 +1568,15 @@ class MessageStatsPlugin(Star):
         """显示本周排行榜，别名：本周水群榜/本周发言排行/本周B话榜"""
         async for result in self._show_rank(event, RankType.WEEKLY):
             yield result
+        async for result in self._yield_stop_command_event(event):
+            yield result
     
     @filter.command("本月发言榜", alias={'本月水群榜', '本月发言排行', '本月B话榜'})
     async def show_monthly_rank(self, event: AstrMessageEvent):
         """显示本月排行榜，别名：本月水群榜/本月发言排行/本月B话榜"""
         async for result in self._show_rank(event, RankType.MONTHLY):
+            yield result
+        async for result in self._yield_stop_command_event(event):
             yield result
     
     @filter.command("本年发言榜", alias={'本年水群榜', '本年发言排行', '本年B话榜', '年榜'})
@@ -1554,17 +1584,23 @@ class MessageStatsPlugin(Star):
         """显示本年排行榜，别名：本年水群榜/本年发言排行/本年B话榜/年榜"""
         async for result in self._show_rank(event, RankType.YEARLY):
             yield result
+        async for result in self._yield_stop_command_event(event):
+            yield result
     
     @filter.command("去年发言榜", alias={'去年水群榜', '去年发言排行', '去年B话榜'})
     async def show_last_year_rank(self, event: AstrMessageEvent):
         """显示去年排行榜，别名：去年水群榜/去年发言排行/去年B话榜"""
         async for result in self._show_rank(event, RankType.LAST_YEAR):
             yield result
+        async for result in self._yield_stop_command_event(event):
+            yield result
 
     @filter.command("昨日发言榜", alias={'昨天发言榜', '昨日排行', '昨日水群榜', '昨日B话榜'})
     async def show_yesterday_rank(self, event: AstrMessageEvent):
         """显示昨日排行榜，别名：昨天发言榜/昨日排行/昨日水群榜/昨日B话榜"""
         async for result in self._show_rank(event, RankType.YESTERDAY):
+            yield result
+        async for result in self._yield_stop_command_event(event):
             yield result
 
     @filter.command("查看发言", alias={'查询发言', '我的发言'})
