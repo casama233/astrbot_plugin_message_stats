@@ -1315,15 +1315,16 @@ class TimerManager:
             self.logger.error(f"手动推送失败: {e}")
             return False
     
-    async def update_config(self, config, group_unified_msg_origins: Dict[str, str] = None) -> bool:
+    async def update_config(self, config, group_unified_msg_origins: Dict[str, str] = None, force_restart: bool = False) -> bool:
         """更新定时配置
         
-        注意：此方法只更新 unified_msg_origin 映射表，不会重复启动已运行的定时任务。
-        如果定时任务需要重启（如配置变更），会先停止再启动。
+        默认只更新 unified_msg_origin 映射表，不会重复启动已运行的定时任务。
+        如果定时任务需要重启（如配置变更），调用方传入 force_restart=True。
         
         Args:
             config: 新的插件配置对象
             group_unified_msg_origins: 新的群组unified_msg_origin映射表
+            force_restart: 是否强制重启正在运行的定时任务
             
         Returns:
             bool: 更新是否成功
@@ -1346,8 +1347,12 @@ class TimerManager:
                     self.logger.info("定时功能已禁用，定时任务已停止")
                 return True
             
-            # 配置可能已变更，重启任务以应用 template_list 中的时间/群组/类型
-            if is_running:
+            if is_running and not force_restart:
+                self.logger.debug("定时任务正在运行，仅刷新 unified_msg_origin 映射表")
+                return True
+
+            # 配置变更时，重启任务以应用 template_list 中的时间/群组/类型
+            if is_running and force_restart:
                 await self.stop_timer()
                 is_running = False
 

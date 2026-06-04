@@ -756,8 +756,7 @@ class MessageStatsPlugin(Star):
                 old_origin = self.group_unified_msg_origins.get(group_id_str)
                 self.group_unified_msg_origins[group_id_str] = unified_msg_origin
                 
-                # 从 unified_msg_origin 中提取群组ID（格式如 "Amydd:GroupMessage:-1003715592711"）
-                # 提取最后一个 ":" 之后的部分作为备用键
+                # 从 unified_msg_origin 中提取备用ID（部分平台这里不是群号，可能是会话/用户ID）
                 extracted_id = None
                 try:
                     extracted_id = unified_msg_origin.rsplit(':', 1)[-1]
@@ -788,19 +787,19 @@ class MessageStatsPlugin(Star):
                         #   2. unified_msg_origin 字符串（如 Amy:GroupMessage:1081839722）
                         is_target_group = False
                         for target_id in self.plugin_config.timer_target_groups:
-                            if group_id_str == target_id or (extracted_id is not None and extracted_id == target_id) or unified_msg_origin == target_id:
+                            if group_id_str == target_id or unified_msg_origin == target_id:
                                 is_target_group = True
                                 break
                         
                         if self.plugin_config.timer_enabled and is_target_group:
-                            self.logger.info(f"检测到目标群组 {group_id} 的 unified_msg_origin 已更新，更新定时任务配置...")
-                            # 确保unified_msg_origin映射表是最新的
+                            self.logger.info(f"检测到目标群组 {group_id} 的 unified_msg_origin 已更新，刷新定时推送目标映射...")
+                            # 只刷新 unified_msg_origin 映射表，避免在到点窗口重启任务导致当天推送被跳过
                             self.timer_manager.push_service.group_unified_msg_origins = self.group_unified_msg_origins
                             success = await self.timer_manager.update_config(self.plugin_config, self.group_unified_msg_origins)
                             if success:
-                                self.logger.info(f"定时任务配置更新成功")
+                                self.logger.info(f"定时推送目标映射刷新成功")
                             else:
-                                self.logger.warning(f"定时任务配置更新失败")
+                                self.logger.warning(f"定时推送目标映射刷新失败")
                 
 
         except (AttributeError, KeyError, TypeError) as e:
@@ -2605,7 +2604,7 @@ class MessageStatsPlugin(Star):
         await self.data_manager.save_config(config)
         self.data_manager.set_plugin_config(config)
         if self.timer_manager:
-            success = await self.timer_manager.update_config(config, self.group_unified_msg_origins)
+            success = await self.timer_manager.update_config(config, self.group_unified_msg_origins, force_restart=True)
             if not success:
                 self.logger.warning("配置已保存，但定时任务运行态更新失败，可能需要重新加载插件或等待群组 unified_msg_origin 收集完成")
             return success
