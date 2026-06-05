@@ -1,5 +1,10 @@
 # 更新日志
 
+## v2.1.1 (2026-06-05)
+
+### 🐛 Bug 修复
+- **修复 `_cleanup_stale_temp_files` 遗漏 Chromium 临时目录清理**：启动清理仅匹配 `playwright-*`/`playwright_*`/`msgstats_pw_*` 三种前缀，遗漏了 Chromium 原生 user data dir（`org.chromium.Chromium.*`）、artifacts（`playwright-artifacts-*`）、chromium dev profile（`playwright_chromiumdev_profile-*`）和 PulseAudio socket（`pulse-*`），导致容器 OOM/kill -9/断电等异常终止后这些空目录永久残留。
+
 ## v2.1.0 (2026-06-04)
 
 ### 🐛 Bug 修复
