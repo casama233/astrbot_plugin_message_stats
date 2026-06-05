@@ -590,8 +590,17 @@ class ImageGenerator:
                 entry_path = os.path.join(temp_dir, entry)
                 if not os.path.isdir(entry_path):
                     continue
-                # Playwright 自动生成的临时目录前缀
-                if entry.startswith(("playwright-", "playwright_", "msgstats_pw_")):
+                # Playwright / Chromium 自动生成的临时目录前缀
+                # 包含 org.chromium.Chromium.*（Chromium 原生 user data dir）、
+                # playwright-artifacts-*、playwright_chromiumdev_profile-*、pulse-* 等
+                if entry.startswith((
+                    "playwright-", "playwright_",
+                    "msgstats_pw_",
+                    "org.chromium.Chromium.",
+                    "playwright-artifacts-",
+                    "playwright_chromiumdev_profile-",
+                    "pulse-",
+                )):
                     try:
                         shutil.rmtree(entry_path, ignore_errors=True)
                         pw_dirs_cleaned += 1
