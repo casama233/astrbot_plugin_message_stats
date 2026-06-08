@@ -126,7 +126,10 @@ class GroupDataStore:
         Returns:
             bool: 始终返回True（实际写入在后台批量执行）
         """
-        # 缓存数据到脏缓存
+        # 缓存数据到脏缓存；如果本次事件没有群名，保留同群尚未落盘的群名
+        if not group_name and group_id in self._dirty_cache:
+            _, existing_dirty_group_name = self._dirty_cache[group_id]
+            group_name = existing_dirty_group_name
         self._dirty_cache[group_id] = (users, group_name)
         self._dirty_count += 1
         

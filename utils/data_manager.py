@@ -342,7 +342,7 @@ class DataManager:
         return users
     
     @safe_data_operation(default_return=None)
-    async def save_group_data(self, group_id: str, users: List[UserData]):
+    async def save_group_data(self, group_id: str, users: List[UserData], group_name: str = None):
         """保存群组数据
         
         异步保存指定群组的用户数据到JSON文件，并清除相关缓存。
@@ -361,7 +361,7 @@ class DataManager:
             raise ValueError(f"群组ID必须是数字字符串，当前值: {group_id}")
         
         # 使用GroupDataStore保存数据
-        success = await self.group_store.save_group_data(group_id, users)
+        success = await self.group_store.save_group_data(group_id, users, group_name=group_name)
         
         if success:
             # 更新缓存为最新数据（不清除缓存，因为延迟写入时磁盘数据可能不是最新的）
@@ -375,7 +375,7 @@ class DataManager:
             self.logger.error(f"群组 {group_id} 数据保存失败")
     
     @safe_data_operation(default_return=(False, 0))
-    async def update_user_message(self, group_id: str, user_id: str, nickname: str) -> tuple:
+    async def update_user_message(self, group_id: str, user_id: str, nickname: str, group_name: str = None) -> tuple:
         """更新用户消息统计
         
         异步更新指定用户在群组中的消息统计，包括新增用户和更新现有用户。
@@ -447,7 +447,7 @@ class DataManager:
             updated_users = list(users_dict.values())
             
             # 保存更新后的数据
-            await self.save_group_data(group_id, updated_users)
+            await self.save_group_data(group_id, updated_users, group_name=group_name)
             
             # 返回更新后的总发言数
             updated_user = users_dict.get(user_id)
