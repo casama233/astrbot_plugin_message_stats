@@ -28,6 +28,7 @@ from .utils.validators import Validators
 from .utils.platform_helper import PlatformHelper
 from .utils.member_cache_manager import MemberCacheManager
 from .utils.llm_analyzer import LLMAnalyzer
+from .utils.event_snapshot import extract_group_message_snapshot, extract_group_name_from_event
 
 from .utils.models import (
     UserData, PluginConfig, GroupInfo, MessageDate, 
@@ -185,8 +186,8 @@ class MessageStatsPlugin(Star):
         self._group_names_dirty = False  # 群名脏标记
         self._save_task: Optional[asyncio.Task] = None  # 后台保存任务
         
-        # 成员缓存管理器 - 管理群成员列表缓存和用户昵称缓存
-        # 使用分层缓存策略（昵称缓存 → 字典缓存 → API获取），
+        # 成员缓存管理器 - 管理群成员列表/字典缓存
+        # 使用分层缓存策略（群成员字典缓存 → API获取），
         # 并在API请求外层添加异步锁防止缓存击穿
         self.member_cache = MemberCacheManager(
             context,
@@ -806,7 +807,32 @@ class MessageStatsPlugin(Star):
             self.logger.error(f"收集群组unified_msg_origin失败: {e}")
         except (RuntimeError, OSError, IOError, ImportError, ValueError) as e:
             self.logger.error(f"收集群组unified_msg_origin失败(系统错误): {e}")
-    async def _cache_group_name(self, event: Optional[AstrMessageEvent], group_id: str):
+    def _remember_group_name(self, group_id: str, group_name: Optional[str]) -> Optional[str]:
+        """记录已知群名到 Web 缓存和定时任务缓存。"""
+        if not group_name:
+            return None
+
+        group_id_str = str(group_id)
+        group_name = str(group_name).strip()
+        if not group_name:
+            return None
+
+        old_name = self._web_group_name_cache.get(group_id_str)
+        changed = old_name != group_name
+        if changed:
+            self._web_group_name_cache[group_id_str] = group_name
+            self._group_names_dirty = True
+            self.logger.info(f"已获取群组 {group_id} 的名称: {group_name}")
+
+        if self.timer_manager:
+            timer_cache = getattr(self.timer_manager, "_group_name_cache", None)
+            timer_name = timer_cache.get(group_id_str) if isinstance(timer_cache, dict) else None
+            if changed or (isinstance(timer_cache, dict) and timer_name != group_name):
+                self.timer_manager.update_group_name_cache(group_id, group_name)
+
+        return group_name
+
+    async def _cache_group_name(self, event: Optional[AstrMessageEvent], group_id: str, group_name: Optional[str] = None):
         """获取并缓存群组名称（跨平台通用）
         
         使用 PlatformHelper 统一获取群组名称，支持所有平台。
@@ -821,39 +847,10 @@ class MessageStatsPlugin(Star):
         try:
             group_id_str = str(group_id)
             
-            group_name = None
-            
-            # 方式1: 优先通过 event.get_group() 获取（框架级，更稳定）
-            if event is not None:
-                try:
-                    group_data = await event.get_group(group_id)
-                    if group_data:
-                        group_name = getattr(group_data, 'group_name', None) or \
-                                     getattr(group_data, 'name', None) or \
-                                     getattr(group_data, 'title', None) or \
-                                     getattr(group_data, 'group_title', None)
-                except Exception:
-                    pass
-            
-            # 方式2: 通过 PlatformHelper API 获取（备用）
             if not group_name:
-                helper = PlatformHelper(event, self.context)
-                group_name = await helper.get_group_name(group_id)
+                group_name = extract_group_name_from_event(event)
             
-            # 如果获取到群名，更新所有缓存
-            if group_name:
-                group_name = str(group_name).strip()
-                
-                # 只在群名发生变化时才保存和日志
-                old_name = self._web_group_name_cache.get(group_id_str)
-                if old_name != group_name:
-                    self._web_group_name_cache[group_id_str] = group_name
-                    self._group_names_dirty = True
-                    self.logger.info(f"已获取群组 {group_id} 的名称: {group_name}")
-                
-                # 更新到 timer_manager 的内存缓存
-                if self.timer_manager:
-                    self.timer_manager.update_group_name_cache(group_id, group_name)
+            self._remember_group_name(group_id_str, group_name)
                 
         except (AttributeError, KeyError, TypeError, RuntimeError) as e:
             self.logger.debug(f"缓存群组名称失败: {e}")
@@ -1150,12 +1147,48 @@ class MessageStatsPlugin(Star):
     
     # ========== 消息监听 ==========
     
+    def _get_wake_prefixes(self) -> List[str]:
+        """Return AstrBot's configured command wake prefixes."""
+        try:
+            config = self.context.get_config()
+            prefixes = config.get("wake_prefix") if config else None
+        except Exception:
+            prefixes = None
+
+        if not prefixes:
+            return ["/"]
+
+        if isinstance(prefixes, str):
+            prefixes = [prefixes]
+        else:
+            try:
+                prefixes = list(prefixes)
+            except TypeError:
+                prefixes = [prefixes]
+
+        normalized = [
+            str(prefix).strip()
+            for prefix in prefixes
+            if prefix is not None and str(prefix).strip()
+        ]
+        return normalized or ["/"]
+
+    def _is_command_message(self, message_str: str) -> bool:
+        """Check whether a message starts with the current AstrBot command prefix."""
+        text = str(message_str or "").strip()
+        return bool(text and any(text.startswith(prefix) for prefix in self._get_wake_prefixes()))
+
+    def _is_command_event(self, event: AstrMessageEvent) -> bool:
+        """Check the original event text before AstrBot strips the wake prefix."""
+        message_obj = getattr(event, "message_obj", None)
+        raw_message_str = getattr(message_obj, "message_str", "")
+        return self._is_command_message(raw_message_str)
+
     @filter.event_message_type(EventMessageType.ALL)
     async def auto_message_listener(self, event: AstrMessageEvent):
         """自动消息监听器 - 监听所有消息并记录群成员发言统计"""
         # 跳过命令消息
-        message_str = getattr(event, 'message_str', '')
-        if message_str and message_str.startswith(('%', '/')):
+        if self._is_command_event(event):
             # 命令消息只交给 command handler 处理；同时关闭默认 LLM 回复，避免全量监听器让 is_wake=True
             try:
                 event.should_call_llm(False)
@@ -1186,9 +1219,9 @@ class MessageStatsPlugin(Star):
         await self._collect_group_unified_msg_origin(event)
         
         # 获取用户昵称并记录统计
-        await self._cache_group_name(event, group_id)
-        nickname = await self._get_user_display_name(event, group_id, user_id)
-        await self._record_message_stats(group_id, user_id, nickname)
+        snapshot = extract_group_message_snapshot(event, user_id)
+        await self._cache_group_name(event, group_id, snapshot.group_name)
+        await self._record_message_stats(group_id, user_id, snapshot.nickname, snapshot.group_name)
     
     def _is_bot_message(self, event: AstrMessageEvent, user_id: str) -> bool:
         """检查是否为机器人消息"""
@@ -1198,7 +1231,7 @@ class MessageStatsPlugin(Star):
         except (AttributeError, KeyError, TypeError):
             return False
     
-    async def _record_message_stats(self, group_id: str, user_id: str, nickname: str):
+    async def _record_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None):
         """记录消息统计
         
         内部方法,用于记录群成员的消息统计数据.会自动验证输入参数并更新数据.
@@ -1237,7 +1270,7 @@ class MessageStatsPlugin(Star):
             group_id, user_id, nickname = validated_data
             
             # 步骤3: 处理消息统计和记录
-            await self._process_message_stats(group_id, user_id, nickname)
+            await self._process_message_stats(group_id, user_id, nickname, group_name)
             
         except Exception as e:
             self.logger.error(f"记录消息统计失败({type(e).__name__}): {e}", exc_info=True)
@@ -1267,7 +1300,7 @@ class MessageStatsPlugin(Star):
         
         return group_id, user_id, nickname
     
-    async def _process_message_stats(self, group_id: str, user_id: str, nickname: str):
+    async def _process_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None):
         """处理消息统计和记录
         
         执行实际的消息统计更新操作，并记录结果日志。
@@ -1280,24 +1313,16 @@ class MessageStatsPlugin(Star):
             nickname (str): 验证后的用户昵称
         """
         # 直接使用data_manager更新用户消息，同时获取更新后的总发言数
-        success, message_count = await self.data_manager.update_user_message(group_id, user_id, nickname)
+        success, message_count = await self.data_manager.update_user_message(
+            group_id,
+            user_id,
+            nickname,
+            group_name=group_name,
+        )
         
         if success:
-            # 智能缓存管理：检查昵称变化
-            cached_nickname = self.member_cache.get_nickname_from_cache(user_id)
-            
-            # 只在昵称变化时才更新缓存（节省API调用）
-            if cached_nickname != nickname:
-                self.member_cache.update_nickname_cache(user_id, nickname)
-                
-                if self.plugin_config.detailed_logging_enabled:
-                    self.logger.debug(f"昵称发生变化，更新缓存: {cached_nickname} -> {nickname}")
-                    self.logger.info(f"记录消息统计: {nickname}")
-            else:
-                # 昵称未变化，只记录基本日志
-                if self.plugin_config.detailed_logging_enabled:
-                    self.logger.debug(f"昵称未变化，保持缓存: {nickname}")
-                    self.logger.info(f"记录消息统计: {nickname}")
+            if self.plugin_config.detailed_logging_enabled:
+                self.logger.info(f"记录消息统计: {nickname}")
             
             # 发言里程碑检测（使用update_user_message返回的message_count，无需额外查询）
             await self._check_milestone(group_id, user_id, nickname, message_count)
@@ -1452,9 +1477,6 @@ class MessageStatsPlugin(Star):
             
         group_id, user_id = str(group_id), str(user_id)
         
-        # 获取用户昵称
-        nickname = await self._get_user_display_name(event, group_id, user_id)
-        
         try:
             # 获取群组数据
             group_data = await self.data_manager.get_group_data(group_id)
@@ -1508,6 +1530,13 @@ class MessageStatsPlugin(Star):
             last_date = ""
             if target_user_data and target_user_data.last_date:
                 last_date = target_user_data.last_date
+
+            nickname = await self._get_user_display_name(
+                event,
+                group_id,
+                user_id,
+                local_nickname=target_user_data.nickname if target_user_data else None,
+            )
             
             # 创建群组信息
             unified_msg_origin = self.group_unified_msg_origins.get(str(group_id), "")
@@ -1677,7 +1706,12 @@ class MessageStatsPlugin(Star):
             active_days = len(target_user_data._message_dates)
             percentage = (target_user_data.message_count / total_messages_all * 100) if total_messages_all > 0 else 0
             
-            nickname = await self._get_user_display_name(event, group_id, target_uid)
+            nickname = await self._get_user_display_name(
+                event,
+                group_id,
+                target_uid,
+                local_nickname=target_user_data.nickname,
+            )
             group_name = await self._get_group_name(event, group_id)
             group_info = GroupInfo(group_id=group_id, group_name=group_name)
             
@@ -1861,7 +1895,7 @@ class MessageStatsPlugin(Star):
             success = await self.member_cache.refresh_group_cache(event, group_id)
             
             if success:
-                yield event.plain_result("群成员缓存、字典缓存和昵称缓存已全部刷新！")
+                yield event.plain_result("群成员缓存和字典缓存已刷新！")
             else:
                 yield event.plain_result("刷新缓存失败,请稍后重试！")
             
@@ -1888,12 +1922,10 @@ class MessageStatsPlugin(Star):
                 f"⚙️ 配置缓存: {cache_stats['config_cache_size']}/{cache_stats['config_cache_maxsize']}",
                 f"👥 群成员缓存: {member_cache_stats['members_cache_size']}/{member_cache_stats['members_cache_maxsize']}",
                 f"📖 字典缓存: {member_cache_stats['dict_cache_size']}",
-                f"🏷️ 昵称缓存: {member_cache_stats['nickname_cache_size']}/{member_cache_stats['nickname_cache_maxsize']}",
                 "━━━━━━━━━━━━━━",
                 "🕐 数据缓存TTL: 5分钟",
                 "🕐 配置缓存TTL: 1分钟", 
-                "🕐 群成员缓存TTL: 5分钟",
-                "🕐 昵称缓存TTL: 10分钟"
+                "🕐 群成员缓存TTL: 5分钟"
             ]
             
             yield event.plain_result('\n'.join(status_msg))
@@ -1904,16 +1936,28 @@ class MessageStatsPlugin(Star):
     
     # ========== 私有方法 ==========
     
-    async def _get_user_display_name(self, event: AstrMessageEvent, group_id: str, user_id: str) -> str:
+    async def _get_user_display_name(
+        self,
+        event: AstrMessageEvent,
+        group_id: str,
+        user_id: str,
+        local_nickname: Optional[str] = None,
+    ) -> str:
         """获取用户的群昵称（委托给 MemberCacheManager）"""
-        # 使用 MemberCacheManager 的统一入口获取昵称
-        nickname = await self.member_cache.get_user_display_name(event, group_id, user_id)
-        
-        # 如果统一逻辑返回默认昵称，使用备用方案
-        if nickname == f"用户{user_id}":
-            return await self.member_cache.get_fallback_nickname(event, user_id)
-        
-        return nickname
+        allow_event_sender_fallback = False
+        try:
+            sender_id = event.get_sender_id() if event is not None else None
+            allow_event_sender_fallback = sender_id is not None and str(sender_id) == str(user_id)
+        except (AttributeError, KeyError, TypeError):
+            allow_event_sender_fallback = False
+
+        return await self.member_cache.get_user_display_name(
+            event,
+            group_id,
+            user_id,
+            local_nickname=local_nickname,
+            allow_event_sender_fallback=allow_event_sender_fallback,
+        )
     
     @data_operation_handler('extract', '群成员昵称数据')
     def _get_display_name_from_member(self, member: Dict[str, Any]) -> Optional[str]:
@@ -1923,11 +1967,6 @@ class MessageStatsPlugin(Star):
     async def _get_user_nickname_unified(self, event: AstrMessageEvent, group_id: str, user_id: str) -> str:
         """统一的用户昵称获取方法（委托给 MemberCacheManager）"""
         return await self.member_cache.get_user_display_name(event, group_id, user_id)
-    
-    @exception_handler(ExceptionConfig(log_exception=True, reraise=True))
-    async def _get_from_nickname_cache(self, user_id: str) -> Optional[str]:
-        """从昵称缓存获取昵称（委托给 MemberCacheManager）"""
-        return self.member_cache.get_nickname_from_cache(user_id)
     
     @exception_handler(ExceptionConfig(log_exception=True, reraise=True))
     async def _get_from_dict_cache(self, group_id: str, user_id: str) -> Optional[str]:
@@ -1942,11 +1981,6 @@ class MessageStatsPlugin(Star):
         """获取备用昵称（委托给 MemberCacheManager）"""
         return await self.member_cache.get_fallback_nickname(event, user_id)
 
-    @exception_handler(ExceptionConfig(log_exception=True, reraise=False))
-    def clear_user_cache(self, user_id: str = None):
-        """清理用户缓存（委托给 MemberCacheManager）"""
-        self.member_cache.clear_user_cache(user_id)
-    
     def _is_blocked_user(self, user_id: str) -> bool:
         """检查用户是否在屏蔽列表中（使用 set 缓存，O(1) 查询）"""
         return str(user_id) in self._blocked_user_set
@@ -1987,8 +2021,9 @@ class MessageStatsPlugin(Star):
                                  getattr(group_data, 'name', None) or \
                                  getattr(group_data, 'title', None) or \
                                  getattr(group_data, 'group_title', None)
-                    if group_name:
-                        return str(group_name).strip()
+                    remembered_group_name = self._remember_group_name(group_id_str, group_name)
+                    if remembered_group_name:
+                        return remembered_group_name
 
             cached_group_name = self._web_group_name_cache.get(group_id_str)
             if cached_group_name:
@@ -1997,8 +2032,9 @@ class MessageStatsPlugin(Star):
             # 如果事件对象获取失败或 event 为 None，使用 PlatformHelper 统一通过API获取（跨平台通用）
             helper = PlatformHelper(event, self.context)
             group_name = await helper.get_group_name(group_id)
-            if group_name:
-                return str(group_name).strip()
+            remembered_group_name = self._remember_group_name(group_id_str, group_name)
+            if remembered_group_name:
+                return remembered_group_name
 
             return f"群{group_id}"
         except (AttributeError, KeyError, TypeError, OSError) as e:
@@ -2198,8 +2234,8 @@ class MessageStatsPlugin(Star):
                 if user.llm_title_color:
                     user.display_title_color = user.llm_title_color
         
-        # 显示排行榜前强制刷新昵称缓存，确保昵称准确性
-        await self._refresh_nickname_cache_for_ranking(event, group_id, group_data)
+        # 显示排行榜前刷新当前群展示名，确保图片/榜单展示尽量使用最新群名片
+        await self._refresh_display_names_for_ranking(event, group_id, group_data)
 
         
         # 根据类型筛选数据并获取排序值
@@ -2227,8 +2263,8 @@ class MessageStatsPlugin(Star):
         
         return group_id, current_user_id, filtered_data, config, title, group_info
     
-    async def _refresh_nickname_cache_for_ranking(self, event: AstrMessageEvent, group_id: str, group_data):
-        """排行榜显示前强制刷新昵称缓存，确保显示最新昵称"""
+    async def _refresh_display_names_for_ranking(self, event: AstrMessageEvent, group_id: str, group_data):
+        """排行榜显示前刷新当前群展示名，确保显示最新昵称"""
         try:
             # 获取最新群成员信息
             members_info = await self._fetch_group_members_from_api(event, group_id)
@@ -2252,25 +2288,22 @@ class MessageStatsPlugin(Star):
                     member = members_dict[user_id]
                     display_name = self.member_cache.get_display_name_from_member(member)
                     if display_name and user.nickname != display_name:
-                        # 更新昵称并同步到昵称缓存
+                        # 更新当前群持久化展示名
                         old_nickname = user.nickname
                         user.nickname = display_name
                         updated_count += 1
                         
-                        # 同时更新昵称缓存
-                        self.member_cache.update_nickname_cache(user_id, display_name)
-                        
                         if self.plugin_config.detailed_logging_enabled:
-                            self.logger.debug(f"排行榜刷新昵称缓存: {old_nickname} → {display_name}")
+                            self.logger.debug(f"排行榜刷新展示名: {old_nickname} → {display_name}")
             
             # 保存更新后的数据
             if updated_count > 0:
                 await self.data_manager.save_group_data(group_id, group_data)
                 if self.plugin_config.detailed_logging_enabled:
-                    self.logger.info(f"排行榜显示前更新了 {updated_count} 个用户的昵称缓存")
+                    self.logger.info(f"排行榜显示前更新了 {updated_count} 个用户的展示名")
             
         except (AttributeError, KeyError, TypeError, ValueError, RuntimeError, IOError, OSError, ConnectionError, asyncio.TimeoutError) as e:
-            self.logger.warning(f"排行榜前刷新昵称缓存失败: {e}")
+            self.logger.warning(f"排行榜前刷新展示名失败: {e}")
 
     async def _render_rank_as_image(self, event: AstrMessageEvent, filtered_data: List[tuple], 
                                   group_info: GroupInfo, title: str, current_user_id: str, config: PluginConfig,
