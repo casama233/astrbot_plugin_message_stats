@@ -64,7 +64,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.1.1")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.1.3")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -1329,6 +1329,19 @@ class MessageStatsPlugin(Star):
         else:
             self.logger.error(f"记录消息统计失败: {nickname}")
     
+    @staticmethod
+    def _calc_beat_percentage(rank: int, active_members: int) -> float:
+        """计算击败的活跃群友百分比。
+
+        排名第 1 视为击败全部其他活跃群友（100%），排名末位视为 0%。
+        仅 1 名活跃群友时返回 100%。
+        """
+        if active_members <= 1:
+            return 100.0
+        beat = (active_members - rank) / (active_members - 1) * 100
+        # 防御性裁剪到 [0, 100]
+        return max(0.0, min(100.0, beat))
+
     async def _check_milestone(self, group_id: str, user_id: str, nickname: str, current_count: int):
         """检测用户发言是否达到里程碑，达到则自动推送个人成就卡片
         
@@ -1365,22 +1378,25 @@ class MessageStatsPlugin(Star):
             if not group_data:
                 return
             
-            # 计算用户的群内排名和群总发言数
+            # 计算用户的群内排名、群总发言数与活跃群友数
             rank = 1
             group_total_messages = 0
+            active_members = 0
             target_user_data = None
-            
+
             for user_data_item in group_data:
                 if not isinstance(user_data_item, UserData):
                     continue
                 group_total_messages += user_data_item.message_count
+                if user_data_item.message_count > 0:
+                    active_members += 1
                 if user_data_item.message_count > current_count:
                     rank += 1
                 if user_data_item.user_id == user_id:
                     target_user_data = user_data_item
-            
-            # 计算发言占比
-            percentage = (current_count / group_total_messages * 100) if group_total_messages > 0 else 0
+
+            # 计算击败的活跃群友百分比（基于群内排名）
+            percentage = self._calc_beat_percentage(rank, active_members)
             
             # 计算今日发言数
             daily_count = 0
@@ -1484,18 +1500,21 @@ class MessageStatsPlugin(Star):
                 yield event.plain_result("该群暂无发言数据！")
                 return
             
-            # 计算用户的群内排名和群总发言数
+            # 计算用户的群内排名、群总发言数与活跃群友数
             rank = 1
             group_total_messages = 0
+            active_members = 0
             target_user_data = None
-            
+
             for user_data_item in group_data:
                 if not isinstance(user_data_item, UserData):
                     continue
                 group_total_messages += user_data_item.message_count
+                if user_data_item.message_count > 0:
+                    active_members += 1
                 if user_data_item.user_id == user_id:
                     target_user_data = user_data_item
-            
+
             if not target_user_data:
                 # 重新计算排名，如果用户没有发言数据
                 for user_data_item in group_data:
@@ -1509,9 +1528,9 @@ class MessageStatsPlugin(Star):
                 for user_data_item in group_data:
                     if isinstance(user_data_item, UserData) and user_data_item.message_count > current_count:
                         rank += 1
-            
-            # 计算发言占比
-            percentage = (current_count / group_total_messages * 100) if group_total_messages > 0 else 0
+
+            # 计算击败的活跃群友百分比（基于群内排名）
+            percentage = self._calc_beat_percentage(rank, active_members)
             
             # 计算今日发言数
             daily_count = 0

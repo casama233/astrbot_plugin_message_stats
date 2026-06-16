@@ -943,7 +943,7 @@ class ImageGenerator:
             active_days: 活跃天数
             last_date: 最后发言日期
             group_total_messages: 群总发言数
-            percentage: 发言占比
+            percentage: 击败的活跃群友百分比
             group_info: 群组信息
             
         Returns:
