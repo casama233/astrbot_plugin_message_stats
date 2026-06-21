@@ -583,31 +583,31 @@ class ImageGenerator:
             if cleaned > 0:
                 self.logger.info(f"启动清理：已删除 {cleaned} 个上次残留的临时图片文件")
             
-            # 清理 Playwright 残留的临时 profiles 目录
-            # 进程异常退出时这些目录不会被 playwright.stop() 清理
-            pw_dirs_cleaned = 0
+            # 清理 Playwright 残留的临时 profiles 目录和 Chromium 锁文件
+            # 进程异常退出时这些目录/文件不会被 playwright.stop() 清理
+            pw_cleaned = 0
             for entry in os.listdir(temp_dir):
                 entry_path = os.path.join(temp_dir, entry)
-                if not os.path.isdir(entry_path):
-                    continue
-                # Playwright / Chromium 自动生成的临时目录前缀
-                # 包含 org.chromium.Chromium.*（Chromium 原生 user data dir）、
-                # playwright-artifacts-*、playwright_chromiumdev_profile-*、pulse-* 等
-                if entry.startswith((
+                if not entry.startswith((
                     "playwright-", "playwright_",
                     "msgstats_pw_",
+                    ".org.chromium.Chromium.",
                     "org.chromium.Chromium.",
                     "playwright-artifacts-",
                     "playwright_chromiumdev_profile-",
                     "pulse-",
                 )):
-                    try:
+                    continue
+                try:
+                    if os.path.isdir(entry_path):
                         shutil.rmtree(entry_path, ignore_errors=True)
-                        pw_dirs_cleaned += 1
-                    except OSError:
-                        pass
-            if pw_dirs_cleaned > 0:
-                self.logger.info(f"启动清理：已删除 {pw_dirs_cleaned} 个上次残留的 Playwright 临时目录")
+                    else:
+                        os.unlink(entry_path)
+                    pw_cleaned += 1
+                except OSError:
+                    pass
+            if pw_cleaned > 0:
+                self.logger.info(f"启动清理：已删除 {pw_cleaned} 个上次残留的 Playwright 临时文件/目录")
         except Exception as e:
             self.logger.warning(f"清理残留临时文件时出现异常: {e}")
     
