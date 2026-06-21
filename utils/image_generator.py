@@ -613,6 +613,7 @@ class ImageGenerator:
         
         使用异步锁防止并发启动。如果是第一个任务则启动浏览器，
         然后增加活跃任务计数器。
+        如果 Chromium 浏览器未安装，自动尝试安装后重试。
         """
         async with self._browser_lock:
             self._active_tasks += 1
@@ -620,25 +621,113 @@ class ImageGenerator:
                 return
             
             self.logger.info("按需启动浏览器...")
+            error_msg = await self._try_launch_browser()
+            if error_msg is None:
+                return  # 启动成功
+            
+            # 启动失败，尝试自动安装 Chromium
+            self.logger.warning(f"Chromium 启动失败: {error_msg}")
+            self.logger.info("正在自动安装 Chromium 浏览器，可能需要 1-2 分钟...")
+            
+            install_ok = await self._auto_install_chromium()
+            if install_ok:
+                # 重试启动
+                retry_error = await self._try_launch_browser()
+                if retry_error is None:
+                    self.logger.info("Chromium 浏览器安装并启动成功")
+                    return
+            
+            # 自动安装也失败了
+            self._active_tasks -= 1
+            raise ImageGenerationError(
+                f"Chromium 浏览器未安装或缺少系统依赖。\n"
+                f"请手动运行: playwright install chromium\n"
+                f"Linux 用户可能还需要: playwright install-deps chromium\n"
+                f"原始错误: {error_msg}"
+            )
+    
+    async def _try_launch_browser(self) -> Optional[str]:
+        """尝试启动浏览器，成功返回 None，失败返回错误信息字符串"""
+        try:
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--disable-extensions"
+                ]
+            )
+            self.logger.info("Chromium浏览器启动成功")
+            return None
+        except Exception as e:
+            return str(e)
+    
+    async def _auto_install_chromium(self) -> bool:
+        """自动安装 Chromium 浏览器，返回是否成功"""
+        try:
+            # 先尝试基本的 chromium 安装
+            self.logger.info("执行 playwright install chromium...")
+            proc = await asyncio.create_subprocess_exec(
+                "playwright", "install", "chromium",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
             try:
-                self.playwright = await async_playwright().start()
-                self.browser = await self.playwright.chromium.launch(
-                    headless=True,
-                    args=[
-                        "--no-sandbox",
-                        "--disable-setuid-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-gpu",
-                        "--no-first-run",
-                        "--no-default-browser-check",
-                        "--disable-extensions"
-                    ]
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                self.logger.error("playwright install chromium 超时（5 分钟）")
+                return False
+            if proc.returncode == 0:
+                self.logger.info("playwright install chromium 完成")
+                return True
+            
+            # install chromium 失败了，可能是缺少系统依赖
+            self.logger.info("正在安装系统依赖 (playwright install-deps chromium)...")
+            proc2 = await asyncio.create_subprocess_exec(
+                "playwright", "install-deps", "chromium",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            try:
+                await asyncio.wait_for(proc2.communicate(), timeout=300)
+            except asyncio.TimeoutError:
+                proc2.kill()
+                await proc2.wait()
+                self.logger.error("playwright install-deps 超时（5 分钟）")
+                return False
+            if proc2.returncode == 0:
+                self.logger.info("系统依赖安装完成")
+                # 再试一次 install chromium
+                proc3 = await asyncio.create_subprocess_exec(
+                    "playwright", "install", "chromium",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
                 )
-                self.logger.info("Chromium浏览器启动成功")
-            except Exception as e:
-                self._active_tasks -= 1
-                self.logger.error(f"启动浏览器失败: {e}")
-                raise ImageGenerationError(f"启动浏览器失败: {e}")
+                try:
+                    await asyncio.wait_for(proc3.communicate(), timeout=300)
+                except asyncio.TimeoutError:
+                    proc3.kill()
+                    await proc3.wait()
+                    self.logger.error("playwright install chromium 重试超时（5 分钟）")
+                    return False
+                if proc3.returncode == 0:
+                    return True
+            
+            self.logger.error("自动安装 Chromium 失败")
+            return False
+        except FileNotFoundError:
+            self.logger.error("找不到 playwright 命令，请确保已安装 playwright 包")
+            return False
+        except Exception as e:
+            self.logger.error(f"自动安装 Chromium 异常: {e}")
+            return False
     
     async def _close_browser(self):
         """任务完成，减少任务计数，如果计数为0则关闭浏览器释放内存"""
