@@ -1,5 +1,25 @@
 # 更新日志
 
+## v2.1.4 (2026-06-21)
+
+### ✨ 新功能
+- **自动安装 Chromium 浏览器**：图片生成失败时自动运行 `playwright install chromium`，无需手动操作
+- **图片失败消息提醒**：浏览器安装失败时，在聊天中提示用户并自动降级为文字排行
+
+### 🎨 主题统一
+- **卡通风格覆盖个人面板**：新建 `personal_stats_cartoon_light.html` 和 `personal_stats_cartoon_dark.html`
+- `generate_personal_stats_image()` 现在根据主题自动选择模板
+
+### 🧹 规范清理
+- 删除 v1.0 旧格式 `config.yaml` 和 `example_config.json`（无代码引用）
+- 移除未使用的 `bleach>=6.0.0` 依赖
+- `_conf_schema.json` theme 选项精简为 5 项（删除已废弃的 bubble 主题）
+- `image_generator.py` 清理 3 处 bubble 主题映射遗留
+- `personal_stats.html` 补充 Content-Security-Policy meta 标签
+
+### 🐛 Bug 修复
+- **Chromium 残留文件清理**：`_cleanup_stale_temp_files()` 现在同时清理 Chromium 锁文件（之前 `isdir()` 跳过了文件类型的 `.org.chromium.Chromium.*`）
+
 ## v2.1.3 (2026-06-16)
 
 ### 🐛 Bug 修复

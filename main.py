@@ -64,7 +64,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.1.3")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.1.4")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -2363,6 +2363,12 @@ class MessageStatsPlugin(Star):
                 text_msg = self._generate_text_message(filtered_data, group_info, title, config)
                 yield event.plain_result(text_msg)
                 
+        except ImageGenerationError as e:
+            self.logger.error(f"图片生成失败: {e}")
+            # 发消息告知用户，同时附带文字排行
+            error_notice = f"⚠️ 图片功能暂不可用\n{e}"
+            text_msg = self._generate_text_message(filtered_data, group_info, title, config)
+            yield event.plain_result(f"{error_notice}\n\n{text_msg}")
         except (IOError, OSError, FileNotFoundError) as e:
             self.logger.error(f"生成图片失败: {e}")
             # 回退到文字模式

@@ -230,13 +230,11 @@ class ImageGenerator:
             self.logger.info(f"自动主题切换已启用，当前时间匹配主题: {theme}")
         
         template_map = {
-            'default': 'rank_template_cartoon_light.html',
-            'cartoon_light': 'rank_template_cartoon_light.html',
-            'cartoon_dark': 'rank_template_cartoon_dark.html',
-            'liquid_glass': 'rank_template_liquid_glass.html',
-            'liquid_glass_dark': 'rank_template_liquid_glass_dark.html',
-            'bubble': 'rank_template_cartoon_light.html',
-            'bubble_dark': 'rank_template_cartoon_dark.html',
+        'default': 'rank_template_cartoon_light.html',
+        'cartoon_light': 'rank_template_cartoon_light.html',
+        'cartoon_dark': 'rank_template_cartoon_dark.html',
+        'liquid_glass': 'rank_template_liquid_glass.html',
+        'liquid_glass_dark': 'rank_template_liquid_glass_dark.html',
         }
         template_file = template_map.get(theme, 'rank_template.html')
         self.template_path = self._templates_dir / template_file
@@ -279,7 +277,6 @@ class ImageGenerator:
                 'liquid_glass': 'liquid_glass_dark',
                 'default': 'cartoon_dark',
                 'cartoon_light': 'cartoon_dark',
-                'bubble': 'cartoon_dark',
             }
             
             # 判断当前时间段
@@ -583,31 +580,31 @@ class ImageGenerator:
             if cleaned > 0:
                 self.logger.info(f"启动清理：已删除 {cleaned} 个上次残留的临时图片文件")
             
-            # 清理 Playwright 残留的临时 profiles 目录
-            # 进程异常退出时这些目录不会被 playwright.stop() 清理
-            pw_dirs_cleaned = 0
+            # 清理 Playwright 残留的临时 profiles 目录和 Chromium 锁文件
+            # 进程异常退出时这些目录/文件不会被 playwright.stop() 清理
+            pw_cleaned = 0
             for entry in os.listdir(temp_dir):
                 entry_path = os.path.join(temp_dir, entry)
-                if not os.path.isdir(entry_path):
-                    continue
-                # Playwright / Chromium 自动生成的临时目录前缀
-                # 包含 org.chromium.Chromium.*（Chromium 原生 user data dir）、
-                # playwright-artifacts-*、playwright_chromiumdev_profile-*、pulse-* 等
-                if entry.startswith((
+                if not entry.startswith((
                     "playwright-", "playwright_",
                     "msgstats_pw_",
+                    ".org.chromium.Chromium.",
                     "org.chromium.Chromium.",
                     "playwright-artifacts-",
                     "playwright_chromiumdev_profile-",
                     "pulse-",
                 )):
-                    try:
+                    continue
+                try:
+                    if os.path.isdir(entry_path):
                         shutil.rmtree(entry_path, ignore_errors=True)
-                        pw_dirs_cleaned += 1
-                    except OSError:
-                        pass
-            if pw_dirs_cleaned > 0:
-                self.logger.info(f"启动清理：已删除 {pw_dirs_cleaned} 个上次残留的 Playwright 临时目录")
+                    else:
+                        os.unlink(entry_path)
+                    pw_cleaned += 1
+                except OSError:
+                    pass
+            if pw_cleaned > 0:
+                self.logger.info(f"启动清理：已删除 {pw_cleaned} 个上次残留的 Playwright 临时文件/目录")
         except Exception as e:
             self.logger.warning(f"清理残留临时文件时出现异常: {e}")
     
@@ -616,6 +613,7 @@ class ImageGenerator:
         
         使用异步锁防止并发启动。如果是第一个任务则启动浏览器，
         然后增加活跃任务计数器。
+        如果 Chromium 浏览器未安装，自动尝试安装后重试。
         """
         async with self._browser_lock:
             self._active_tasks += 1
@@ -623,25 +621,113 @@ class ImageGenerator:
                 return
             
             self.logger.info("按需启动浏览器...")
+            error_msg = await self._try_launch_browser()
+            if error_msg is None:
+                return  # 启动成功
+            
+            # 启动失败，尝试自动安装 Chromium
+            self.logger.warning(f"Chromium 启动失败: {error_msg}")
+            self.logger.info("正在自动安装 Chromium 浏览器，可能需要 1-2 分钟...")
+            
+            install_ok = await self._auto_install_chromium()
+            if install_ok:
+                # 重试启动
+                retry_error = await self._try_launch_browser()
+                if retry_error is None:
+                    self.logger.info("Chromium 浏览器安装并启动成功")
+                    return
+            
+            # 自动安装也失败了
+            self._active_tasks -= 1
+            raise ImageGenerationError(
+                f"Chromium 浏览器未安装或缺少系统依赖。\n"
+                f"请手动运行: playwright install chromium\n"
+                f"Linux 用户可能还需要: playwright install-deps chromium\n"
+                f"原始错误: {error_msg}"
+            )
+    
+    async def _try_launch_browser(self) -> Optional[str]:
+        """尝试启动浏览器，成功返回 None，失败返回错误信息字符串"""
+        try:
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--disable-extensions"
+                ]
+            )
+            self.logger.info("Chromium浏览器启动成功")
+            return None
+        except Exception as e:
+            return str(e)
+    
+    async def _auto_install_chromium(self) -> bool:
+        """自动安装 Chromium 浏览器，返回是否成功"""
+        try:
+            # 先尝试基本的 chromium 安装
+            self.logger.info("执行 playwright install chromium...")
+            proc = await asyncio.create_subprocess_exec(
+                "playwright", "install", "chromium",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
             try:
-                self.playwright = await async_playwright().start()
-                self.browser = await self.playwright.chromium.launch(
-                    headless=True,
-                    args=[
-                        "--no-sandbox",
-                        "--disable-setuid-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-gpu",
-                        "--no-first-run",
-                        "--no-default-browser-check",
-                        "--disable-extensions"
-                    ]
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                self.logger.error("playwright install chromium 超时（5 分钟）")
+                return False
+            if proc.returncode == 0:
+                self.logger.info("playwright install chromium 完成")
+                return True
+            
+            # install chromium 失败了，可能是缺少系统依赖
+            self.logger.info("正在安装系统依赖 (playwright install-deps chromium)...")
+            proc2 = await asyncio.create_subprocess_exec(
+                "playwright", "install-deps", "chromium",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            try:
+                await asyncio.wait_for(proc2.communicate(), timeout=300)
+            except asyncio.TimeoutError:
+                proc2.kill()
+                await proc2.wait()
+                self.logger.error("playwright install-deps 超时（5 分钟）")
+                return False
+            if proc2.returncode == 0:
+                self.logger.info("系统依赖安装完成")
+                # 再试一次 install chromium
+                proc3 = await asyncio.create_subprocess_exec(
+                    "playwright", "install", "chromium",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
                 )
-                self.logger.info("Chromium浏览器启动成功")
-            except Exception as e:
-                self._active_tasks -= 1
-                self.logger.error(f"启动浏览器失败: {e}")
-                raise ImageGenerationError(f"启动浏览器失败: {e}")
+                try:
+                    await asyncio.wait_for(proc3.communicate(), timeout=300)
+                except asyncio.TimeoutError:
+                    proc3.kill()
+                    await proc3.wait()
+                    self.logger.error("playwright install chromium 重试超时（5 分钟）")
+                    return False
+                if proc3.returncode == 0:
+                    return True
+            
+            self.logger.error("自动安装 Chromium 失败")
+            return False
+        except FileNotFoundError:
+            self.logger.error("找不到 playwright 命令，请确保已安装 playwright 包")
+            return False
+        except Exception as e:
+            self.logger.error(f"自动安装 Chromium 异常: {e}")
+            return False
     
     async def _close_browser(self):
         """任务完成，减少任务计数，如果计数为0则关闭浏览器释放内存"""
@@ -841,18 +927,26 @@ class ImageGenerator:
             page = await self.browser.new_page(device_scale_factor=2)
             await page.set_viewport_size({"width": 480, "height": self.viewport_height})
             
-            # 加载模板
-            template_path = self._templates_dir / "personal_stats.html"
-            if not os.path.exists(template_path):
-                self.logger.warning(f"个人卡片模板文件不存在: {template_path}")
-                return None
-            
-            # 检测是否应该深色
+            # 检测当前主题并选择对应模板
             theme = getattr(self.config, 'theme', 'default')
             auto_switch = getattr(self.config, 'auto_theme_switch', False)
             if auto_switch:
                 theme = self._get_auto_theme(theme)
             is_dark = theme.endswith('_dark')
+            
+            # 根据主题选择个人面板模板
+            personal_template_map = {
+                'default': 'personal_stats.html',
+                'cartoon_light': 'personal_stats_cartoon_light.html',
+                'cartoon_dark': 'personal_stats_cartoon_dark.html',
+                'liquid_glass': 'personal_stats.html',
+                'liquid_glass_dark': 'personal_stats.html',
+            }
+            template_file = personal_template_map.get(theme, 'personal_stats.html')
+            template_path = self._templates_dir / template_file
+            if not os.path.exists(template_path):
+                self.logger.warning(f"个人卡片模板文件不存在: {template_path}")
+                return None
             data['is_dark'] = is_dark
             data['custom_font_css'] = self._get_custom_font_css()
             data['current_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
