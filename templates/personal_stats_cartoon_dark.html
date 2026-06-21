@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; font-src 'self' file: data:; style-src 'self' 'unsafe-inline' https:;">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人发言统计</title>
+    <style>
+        {{ data.custom_font_css | safe }}
+        @import url('https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--message-stats-font-family, "ZCOOL KuaiLe", "Comic Sans MS", "Chalkboard SE", "Marker Felt", "PingFang SC", cursive, sans-serif);
+            background: #1a1a2e;
+            min-height: 100vh;
+            padding: 40px 24px;
+            color: #e8e0d6;
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(circle at 10% 20%, rgba(255, 183, 77, 0.08) 0%, transparent 50%),
+                radial-gradient(circle at 90% 80%, rgba(129, 199, 132, 0.06) 0%, transparent 50%),
+                radial-gradient(circle at 50% 50%, rgba(100, 181, 246, 0.05) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container { max-width: 520px; margin: 0 auto; position: relative; z-index: 1; }
+
+        .rank-card {
+            background: #2a2a44;
+            border-radius: 40px 60px 60px 40px;
+            padding: 28px 24px 24px;
+            border: 3px solid #8d7b6a;
+            box-shadow: 8px 8px 0 #0f0f1a;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .rank-card::before {
+            content: '✦';
+            position: absolute;
+            top: -8px;
+            left: 20px;
+            font-size: 24px;
+            color: #ffab91;
+            transform: rotate(-15deg);
+        }
+
+        .rank-card::after {
+            content: '✧';
+            position: absolute;
+            top: -10px;
+            right: 24px;
+            font-size: 28px;
+            color: #ffcc80;
+            transform: rotate(20deg);
+        }
+
+        .header-section {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 3px dashed #5d5348;
+        }
+
+        .avatar-lg {
+            width: 80px; height: 80px;
+            border-radius: 40% 60% 60% 40%;
+            object-fit: cover;
+            flex-shrink: 0;
+            border: 3px solid #8d7b6a;
+            box-shadow: 4px 4px 0 #0f0f1a;
+        }
+
+        .avatar-placeholder-lg {
+            width: 80px; height: 80px;
+            border-radius: 40% 60% 60% 40%;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 32px;
+            background: #3a3a55;
+            color: #a89a86;
+            border: 3px solid #8d7b6a;
+            box-shadow: 4px 4px 0 #0f0f1a;
+        }
+
+        .user-info-area { flex: 1; min-width: 0; }
+
+        .nickname-lg {
+            font-size: 26px;
+            font-weight: 400;
+            color: #f5e6d3;
+            margin-bottom: 4px;
+            word-break: break-all;
+            text-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+        }
+
+        .badge-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 4px;
+        }
+
+        .sub-text { font-size: 13px; color: #a89a86; }
+
+        .title-badge {
+            display: inline-block;
+            padding: 2px 12px;
+            border-radius: 30px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(255,255,255,0.08);
+            border: 2px solid rgba(255,255,255,0.15);
+            transform: rotate(-1deg);
+        }
+
+        .rank-badge {
+            flex-shrink: 0;
+            width: 72px; height: 72px;
+            border-radius: 50% 50% 50% 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            background: #353550;
+            border: 3px solid #8d7b6a;
+            box-shadow: 4px 4px 0 #0f0f1a;
+            color: #ffab91;
+            transform: rotate(-2deg);
+        }
+
+        .rank-number { font-size: 28px; line-height: 1; }
+        .rank-label { font-size: 11px; font-weight: 500; margin-top: 2px; color: #a89a86; }
+
+        .total-section {
+            margin-bottom: 20px;
+            padding: 16px;
+            border-radius: 40px 40px 40px 8px;
+            text-align: center;
+            background: #333350;
+            border: 3px solid #8d7b6a;
+            box-shadow: 6px 6px 0 #0f0f1a;
+            transform: rotate(-0.5deg);
+        }
+
+        .total-value {
+            font-size: 42px;
+            font-weight: 400;
+            color: #ffab91;
+            font-feature-settings: "tnum";
+            line-height: 1.2;
+            text-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+        }
+
+        .total-label { font-size: 14px; margin-top: 4px; color: #a89a86; }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+
+        .stat-item {
+            border-radius: 30px 30px 30px 8px;
+            padding: 16px;
+            text-align: center;
+            background: #333350;
+            border: 2.5px solid #8d7b6a;
+            box-shadow: 5px 5px 0 #0f0f1a;
+        }
+
+        .stat-item:nth-child(odd) { transform: rotate(-1deg); }
+        .stat-item:nth-child(even) { transform: rotate(1deg); }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: 400;
+            font-feature-settings: "tnum";
+            line-height: 1.2;
+            color: #f5e6d3;
+            text-shadow: 1px 1px 0 rgba(0,0,0,0.3);
+        }
+
+        .stat-value.primary { color: #ffab91; }
+        .stat-label { font-size: 13px; margin-top: 4px; color: #a89a86; }
+
+        .detail-list { display: flex; flex-direction: column; }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            font-size: 15px;
+            border-top: 2px dashed #5d5348;
+        }
+
+        .detail-row:last-child { padding-bottom: 0; }
+        .detail-label { font-weight: 500; color: #a89a86; }
+        .detail-val { font-weight: 600; color: #f5e6d3; }
+
+        .footer {
+            text-align: center;
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 3px dashed #5d5348;
+            font-size: 14px;
+            color: #6e6154;
+        }
+
+        .footer p { margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="rank-card">
+            <div class="header-section">
+                {% if data.avatar_url %}
+                    <img class="avatar-lg" src="{{ data.avatar_url }}" onerror="this.style.display='none'" />
+                {% else %}
+                    <div class="avatar-placeholder-lg">{{ data.nickname[0] if data.nickname else '?' }}</div>
+                {% endif %}
+                <div class="user-info-area">
+                    <div class="nickname-lg">{{ data.nickname }}</div>
+                    <div class="badge-row">
+                        <span class="sub-text">{{ data.user_id }}</span>
+                        {% if data.llm_title %}
+                        <span class="title-badge" style="color:{{ data.llm_color or '#ffab91' }}">{{ data.llm_title }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="rank-badge">
+                    <div class="rank-number">#{{ data.rank }}</div>
+                    <div class="rank-label">排名</div>
+                </div>
+            </div>
+
+            <div class="total-section">
+                <div class="total-value">{{ data.total }}</div>
+                <div class="total-label">总发言数</div>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-item"><div class="stat-value primary">{{ data.daily }}</div><div class="stat-label">今日发言</div></div>
+                <div class="stat-item"><div class="stat-value">{{ data.yesterday }}</div><div class="stat-label">昨日发言</div></div>
+                <div class="stat-item"><div class="stat-value">{{ data.weekly }}</div><div class="stat-label">本周发言</div></div>
+                <div class="stat-item"><div class="stat-value">{{ data.monthly }}</div><div class="stat-label">本月发言</div></div>
+            </div>
+
+            <div class="detail-list">
+                <div class="detail-row"><span class="detail-label">活跃天数</span><span class="detail-val">{{ data.active_days }} 天</span></div>
+                <div class="detail-row"><span class="detail-label">最后互动</span><span class="detail-val">{{ data.last_date if data.last_date else "暂无记录" }}</span></div>
+            </div>
+        </div>
+        <div class="footer">
+            <p>🤖 由 AstrBot 发言统计插件生成</p>
+            <p>生成时间: {{ data.current_time }}</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -230,13 +230,11 @@ class ImageGenerator:
             self.logger.info(f"自动主题切换已启用，当前时间匹配主题: {theme}")
         
         template_map = {
-            'default': 'rank_template_cartoon_light.html',
-            'cartoon_light': 'rank_template_cartoon_light.html',
-            'cartoon_dark': 'rank_template_cartoon_dark.html',
-            'liquid_glass': 'rank_template_liquid_glass.html',
-            'liquid_glass_dark': 'rank_template_liquid_glass_dark.html',
-            'bubble': 'rank_template_cartoon_light.html',
-            'bubble_dark': 'rank_template_cartoon_dark.html',
+        'default': 'rank_template_cartoon_light.html',
+        'cartoon_light': 'rank_template_cartoon_light.html',
+        'cartoon_dark': 'rank_template_cartoon_dark.html',
+        'liquid_glass': 'rank_template_liquid_glass.html',
+        'liquid_glass_dark': 'rank_template_liquid_glass_dark.html',
         }
         template_file = template_map.get(theme, 'rank_template.html')
         self.template_path = self._templates_dir / template_file
@@ -279,7 +277,6 @@ class ImageGenerator:
                 'liquid_glass': 'liquid_glass_dark',
                 'default': 'cartoon_dark',
                 'cartoon_light': 'cartoon_dark',
-                'bubble': 'cartoon_dark',
             }
             
             # 判断当前时间段
@@ -841,18 +838,26 @@ class ImageGenerator:
             page = await self.browser.new_page(device_scale_factor=2)
             await page.set_viewport_size({"width": 480, "height": self.viewport_height})
             
-            # 加载模板
-            template_path = self._templates_dir / "personal_stats.html"
-            if not os.path.exists(template_path):
-                self.logger.warning(f"个人卡片模板文件不存在: {template_path}")
-                return None
-            
-            # 检测是否应该深色
+            # 检测当前主题并选择对应模板
             theme = getattr(self.config, 'theme', 'default')
             auto_switch = getattr(self.config, 'auto_theme_switch', False)
             if auto_switch:
                 theme = self._get_auto_theme(theme)
             is_dark = theme.endswith('_dark')
+            
+            # 根据主题选择个人面板模板
+            personal_template_map = {
+                'default': 'personal_stats.html',
+                'cartoon_light': 'personal_stats_cartoon_light.html',
+                'cartoon_dark': 'personal_stats_cartoon_dark.html',
+                'liquid_glass': 'personal_stats.html',
+                'liquid_glass_dark': 'personal_stats.html',
+            }
+            template_file = personal_template_map.get(theme, 'personal_stats.html')
+            template_path = self._templates_dir / template_file
+            if not os.path.exists(template_path):
+                self.logger.warning(f"个人卡片模板文件不存在: {template_path}")
+                return None
             data['is_dark'] = is_dark
             data['custom_font_css'] = self._get_custom_font_css()
             data['current_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
