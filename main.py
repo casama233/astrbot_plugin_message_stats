@@ -64,7 +64,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.1.4")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.1.5")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -728,6 +728,14 @@ class MessageStatsPlugin(Star):
             if not config_dict.get('llm_system_prompt', ''):
                 from .utils.llm_analyzer import DEFAULT_SYSTEM_PROMPT as default_prompt
                 config_dict['llm_system_prompt'] = default_prompt
+            
+            # 兼容旧版 if_send_pic 配置迁移至 render_mode
+            if 'render_mode' not in config_dict and 'if_send_pic' in config_dict:
+                old_val = str(config_dict.get('if_send_pic', '')).strip()
+                if old_val in ('文字', '0', 'false', 'off', 'no'):
+                    config_dict['render_mode'] = 'text'
+                else:
+                    config_dict['render_mode'] = 'playwright'
             
             # 使用PluginConfig.from_dict()方法进行安全的配置转换
             config = PluginConfig.from_dict(config_dict)
@@ -2193,13 +2201,14 @@ class MessageStatsPlugin(Star):
                 except Exception as e:
                     self.logger.error(f"❌ 手动LLM头衔生成异常: {e}", exc_info=True)
             
-            # 根据配置选择显示模式
-            if config.if_send_pic:
-                async for result in self._render_rank_as_image(event, filtered_data, group_info, title, current_user_id, config, token_usage_info, titles_map):
-
+            # 根据配置选择渲染模式
+            render_mode = getattr(config, 'render_mode', 'playwright')
+            if render_mode == 'text':
+                async for result in self._render_rank_as_text(event, filtered_data, group_info, title, config):
                     yield result
             else:
-                async for result in self._render_rank_as_text(event, filtered_data, group_info, title, config):
+                # playwright 或 t2i 都走图片渲染（playwright 失败自动降级 t2i）
+                async for result in self._render_rank_as_image(event, filtered_data, group_info, title, current_user_id, config, token_usage_info, titles_map):
                     yield result
         
         except (IOError, OSError) as e:
@@ -2348,27 +2357,42 @@ class MessageStatsPlugin(Star):
                 yield event.plain_result(text_msg)
                 return
 
-            # 使用图片生成器（传入titles_map）
-            temp_path = await self.image_generator.generate_rank_image(
-                users_for_image, group_info, title, current_user_id, llm_token_usage, titles_map
-            )
+            # 图片渲染（playwright / t2i 双向试探）
+            temp_path = None
+            try:
+                render_mode = getattr(config, 'render_mode', 'playwright')
+                if render_mode == 't2i':
+                    temp_path = await self._try_t2i_render(users_for_image, group_info, title, current_user_id, llm_token_usage, titles_map)
+                    if not temp_path:
+                        yield event.plain_result("⚠️ t2i 渲染失败，正在尝试 Playwright...")
+                        temp_path = await self._try_playwright_render(users_for_image, group_info, title, current_user_id, llm_token_usage, titles_map)
+                else:
+                    temp_path = await self._try_playwright_render(users_for_image, group_info, title, current_user_id, llm_token_usage, titles_map)
+                    if not temp_path:
+                        yield event.plain_result("⚠️ Playwright 渲染失败，正在尝试 t2i...")
+                        temp_path = await self._try_t2i_render(users_for_image, group_info, title, current_user_id, llm_token_usage, titles_map)
+                
+                if not temp_path:
+                    raise ImageGenerationError("Playwright 和 t2i 均渲染失败")
+            except ImageGenerationError:
+                raise
 
             
-            # 检查图片文件是否存在
-            if os.path.exists(temp_path):
+            # 检查图片路径是否存在（t2i 返回 URL，playwright 返回本地路径）
+            if temp_path and (str(temp_path).startswith('http') or os.path.exists(temp_path)):
                 yield event.image_result(str(temp_path))
-                self._schedule_file_cleanup(str(temp_path))
+                if os.path.exists(temp_path):
+                    self._schedule_file_cleanup(str(temp_path))
             else:
                 # 回退到文字模式
                 text_msg = self._generate_text_message(filtered_data, group_info, title, config)
                 yield event.plain_result(text_msg)
                 
         except ImageGenerationError as e:
-            self.logger.error(f"图片生成失败: {e}")
-            # 发消息告知用户，同时附带文字排行
-            error_notice = f"⚠️ 图片功能暂不可用\n{e}"
+            self.logger.error(f"图片渲染失败（Playwright/t2i 均不可用）: {e}")
+            # 最终降级文字
             text_msg = self._generate_text_message(filtered_data, group_info, title, config)
-            yield event.plain_result(f"{error_notice}\n\n{text_msg}")
+            yield event.plain_result(f"⚠️ 图片渲染失败，已自动切换为文字模式\n\n{text_msg}")
         except (IOError, OSError, FileNotFoundError) as e:
             self.logger.error(f"生成图片失败: {e}")
             # 回退到文字模式
@@ -2395,6 +2419,28 @@ class MessageStatsPlugin(Star):
             yield event.plain_result(text_msg)
         finally:
             pass
+    
+    async def _try_playwright_render(self, users_for_image, group_info, title, current_user_id, llm_token_usage, titles_map):
+        """尝试 playwright 渲染，成功返回路径，失败返回 None"""
+        try:
+            return await self.image_generator.generate_rank_image(
+                users_for_image, group_info, title, current_user_id, llm_token_usage, titles_map
+            )
+        except ImageGenerationError as e:
+            self.logger.warning(f"Playwright 渲染失败: {e}")
+            return None
+    
+    async def _try_t2i_render(self, users_for_image, group_info, title, current_user_id, llm_token_usage, titles_map):
+        """尝试官方 t2i 渲染，成功返回路径，失败返回 None"""
+        try:
+            html_content = await self.image_generator._generate_html(
+                users_for_image, group_info, title, current_user_id, llm_token_usage, titles_map
+            )
+            url = await self.html_render(html_content)
+            return url
+        except Exception as e:
+            self.logger.warning(f"t2i 渲染失败: {e}")
+            return None
     
     async def _render_rank_as_text(self, event: AstrMessageEvent, filtered_data: List[tuple], 
                                  group_info: GroupInfo, title: str, config: PluginConfig):
