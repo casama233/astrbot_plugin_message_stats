@@ -98,7 +98,7 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 | `theme_switch_light_time` | string | `06:00` | 浅色主题开始时间，格式 HH:MM |
 | `theme_switch_dark_time` | string | `18:00` | 深色主题开始时间，格式 HH:MM |
 | `rand` | int | `20` | 排行榜显示人数（1-100） |
-| `if_send_pic` | string | `图片` | 排行榜输出模式：`图片` 或 `文字` |
+| `render_mode` | string | `playwright` | 排行榜图片渲染方式：`playwright`（本地 Chromium）、`t2i`（AstrBot 文转图服务）、`text`（纯文字）。图片模式下两种方式自动互相降级，均失败回退文字模式 |
 | `detailed_logging_enabled` | bool | `true` | 是否开启详细日志记录 |
 | `timer_enabled` | bool | `false` | 是否启用定时推送排行榜功能 |
 | `timer_push_time` | string | `09:00` | 定时推送时间（支持 HH:MM 或 cron 格式） |
@@ -177,6 +177,11 @@ astrbot_plugin_message_stats/
 - **飞书（Lark/Feishu）** - 完整功能支持
 
 ## 📝 更新日志
+
+### v2.1.5 (2026-06-27)
+- ✅ 新增 `render_mode` 渲染方式配置（playwright / t2i / text）
+- ✅ 双向降级链：图片模式下 playwright 和 t2i 自动互相降级
+- ✅ 降级消息提示
 
 ### v2.0.6 (2026-05-23)
 - ✅ Pages 面板新增字体上传、选择、删除和恢复默认

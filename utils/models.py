@@ -500,6 +500,7 @@ class PluginConfig:
         self.is_admin_restricted = 0
         self.rand = 20
         self.if_send_pic = 1
+        self.render_mode = "playwright"  # 渲染方式: playwright / t2i / text
         self.detailed_logging_enabled = True  # 默认开启详细日志，便于调试
         
         # 定时功能配置
@@ -673,6 +674,7 @@ class PluginConfig:
         config.is_admin_restricted = data.get("is_admin_restricted", 0)
         config.rand = data.get("rand", 20)
         config.if_send_pic = if_send_pic
+        config.render_mode = str(data.get("render_mode", config.render_mode))
         config.detailed_logging_enabled = data.get("detailed_logging_enabled", True)
         timer_tasks_raw = data.get("timer_tasks", [])
         if isinstance(timer_tasks_raw, list):

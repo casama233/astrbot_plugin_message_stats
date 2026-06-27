@@ -53,12 +53,12 @@
       "step": 1
     }
   },
-  "if_send_pic": {
+  "render_mode": {
     "type": "string",
-    "description": "排行榜输出模式",
-    "hint": "选择排行榜的展示方式，图片模式更美观但消耗更多资源",
-    "default": "图片",
-    "options": ["文字", "图片"]
+    "description": "图片渲染方式",
+    "hint": "playwright：本地 Chromium 渲染，失败自动尝试 t2i → 均失败则降级为纯文字。t2i：使用 AstrBot 文转图服务，失败自动尝试 playwright → 均失败则降级为纯文字。text：纯文字输出",
+    "default": "playwright",
+    "options": ["playwright", "t2i", "text"]
   },
   "timer_tasks": {
     "type": "template_list",
