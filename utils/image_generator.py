@@ -686,6 +686,20 @@ class ImageGenerator:
                 return False
             if proc.returncode == 0:
                 self.logger.info("playwright install chromium 完成")
+                # 二进制装好了，补装系统依赖（无头浏览器运行需要 libnspr4.so 等库）
+                # deps 失败不影响整体结果——可能已经装过或者非 Linux 环境
+                self.logger.info("补充安装系统依赖 (playwright install-deps chromium)...")
+                try:
+                    proc_deps = await asyncio.create_subprocess_exec(
+                        "playwright", "install-deps", "chromium",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    await asyncio.wait_for(proc_deps.communicate(), timeout=300)
+                    if proc_deps.returncode == 0:
+                        self.logger.info("系统依赖安装完成")
+                except (asyncio.TimeoutError, Exception) as e:
+                    self.logger.warning(f"系统依赖安装跳过: {e}")
                 return True
             
             # install chromium 失败了，可能是缺少系统依赖
