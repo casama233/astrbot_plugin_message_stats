@@ -21,6 +21,7 @@ from astrbot.api import logger
 from .utils.data_manager import DataManager
 from .utils.image_generator import ImageGenerator, ImageGenerationError
 from .utils.member_cache_manager import MemberCacheManager
+from .utils.event_snapshot import extract_group_message_snapshot
 from .utils.web_panel_mixin import WebPanelMixin
 from .utils.stats_mixin import StatsMixin
 from .utils.ranking_mixin import RankingMixin
