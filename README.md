@@ -178,9 +178,6 @@ astrbot_plugin_message_stats/
 
 ## 📝 更新日志
 
-### v2.1.7 (2026-07-10)
-- ✅ 修复 AstrBot v4.26.5 下 t2i 排行榜渲染缺少 `data` 参数的问题
-
 ### v2.1.5 (2026-06-27)
 - ✅ 新增 `render_mode` 渲染方式配置（playwright / t2i / text）
 - ✅ 双向降级链：图片模式下 playwright 和 t2i 自动互相降级
