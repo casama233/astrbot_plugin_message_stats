@@ -2436,7 +2436,9 @@ class MessageStatsPlugin(Star):
             html_content = await self.image_generator._generate_html(
                 users_for_image, group_info, title, current_user_id, llm_token_usage, titles_map
             )
-            url = await self.html_render(html_content)
+            # _generate_html 已经返回完整 HTML；AstrBot v4.26.5 的
+            # Star.html_render 仍要求显式传入模板数据参数。
+            url = await self.html_render(html_content, {})
             return url
         except Exception as e:
             self.logger.warning(f"t2i 渲染失败: {e}")

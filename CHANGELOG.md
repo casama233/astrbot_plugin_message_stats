@@ -1,5 +1,10 @@
 # 更新日志
 
+## v2.1.7 (2026-07-10)
+
+### 🐛 Bug 修复
+- **AstrBot v4.26.5 T2I 渲染兼容性**：调用 `Star.html_render()` 时显式传入空模板数据，修复排行榜使用 t2i 模式时报 `missing 1 required positional argument: 'data'` 并回退 Playwright 的问题
+
 ## v2.1.6 (2026-06-29)
 
 ### 🐛 Bug 修复
