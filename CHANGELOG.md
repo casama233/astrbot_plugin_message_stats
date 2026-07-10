@@ -5,6 +5,8 @@
 ### 🐛 Bug 修复
 - **AstrBot v4.26.5 T2I 渲染兼容性**：调用 `Star.html_render()` 时显式传入空模板数据，修复排行榜使用 t2i 模式时报 `missing 1 required positional argument: 'data'` 并回退 Playwright 的问题
 
+- **T2I 自适应画布**：复用 Playwright 的容器宽度规则，支持 PNG/JPEG 两级渲染、本地结果校验与右侧空白裁切，保持排行榜内容的自然高度
+
 ## v2.1.6 (2026-06-29)
 
 ### 🐛 Bug 修复
