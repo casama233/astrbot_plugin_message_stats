@@ -33,8 +33,25 @@ from .utils.constants import (
 )
 
 
+def _install_feature_methods(*feature_classes):
+    """Attach split feature methods without adding framework-visible base classes."""
+
+    def decorator(plugin_class):
+        for feature_class in feature_classes:
+            for name, value in vars(feature_class).items():
+                if name.startswith("__"):
+                    continue
+                if name in plugin_class.__dict__:
+                    raise RuntimeError(f"duplicate plugin method: {name}")
+                setattr(plugin_class, name, value)
+        return plugin_class
+
+    return decorator
+
+
 @register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.1.7")
-class MessageStatsPlugin(WebPanelMixin, StatsMixin, RankingMixin, Star):
+@_install_feature_methods(WebPanelMixin, StatsMixin, RankingMixin)
+class MessageStatsPlugin(Star):
     """群发言统计插件
     
     该插件用于统计群组成员的发言次数,并生成多种类型的排行榜.
