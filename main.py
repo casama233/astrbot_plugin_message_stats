@@ -548,6 +548,24 @@ class MessageStatsPlugin(Star):
     @filter.event_message_type(EventMessageType.ALL)
     async def auto_message_listener(self, event: AstrMessageEvent):
         """自动消息监听器 - 监听所有消息并记录群成员发言统计"""
+        # 日期在前的自然语言查询不能用 RegexFilter 注册，否则 AstrBot 后台会把
+        # 完整正则表达式展示成命令名；在消息监听器中识别可保留自然语法并避免该问题。
+        message_text = str(event.get_message_str() or "").strip()
+        if CUSTOM_DATE_RANK_MESSAGE_PATTERN.fullmatch(message_text):
+            try:
+                custom_period = self._parse_custom_rank_period(message_text)
+            except ValueError as exc:
+                event.should_call_llm(False)
+                yield event.plain_result(str(exc))
+                async for result in self._yield_stop_command_event(event):
+                    yield result
+                return
+            async for result in self._show_rank(event, custom_period=custom_period):
+                yield result
+            async for result in self._yield_stop_command_event(event):
+                yield result
+            return
+
         # 跳过命令消息
         if self._is_command_event(event):
             # 命令消息只交给 command handler 处理；同时关闭默认 LLM 回复，避免全量监听器让 is_wake=True
@@ -556,14 +574,7 @@ class MessageStatsPlugin(Star):
             except Exception:
                 pass
             return
-        message_text = str(event.get_message_str() or "").strip()
-        if CUSTOM_DATE_RANK_MESSAGE_PATTERN.fullmatch(message_text):
-            try:
-                event.should_call_llm(False)
-            except Exception:
-                pass
-            return
-        
+
         # 获取基本信息
         group_id = event.get_group_id()
         user_id = event.get_sender_id()
@@ -728,22 +739,6 @@ class MessageStatsPlugin(Star):
         async for result in self._yield_stop_command_event(event):
             yield result
 
-    @filter.regex(CUSTOM_DATE_RANK_MESSAGE_PATTERN)
-    async def show_custom_date_rank(self, event: AstrMessageEvent):
-        """显示指定单日或日期区间的排行榜。"""
-        try:
-            custom_period = self._parse_custom_rank_period(event.get_message_str())
-        except ValueError as exc:
-            event.should_call_llm(False)
-            yield event.plain_result(str(exc))
-            async for result in self._yield_stop_command_event(event):
-                yield result
-            return
-        async for result in self._show_rank(event, custom_period=custom_period):
-            yield result
-        async for result in self._yield_stop_command_event(event):
-            yield result
-    
     @filter.command("今日发言榜", alias={'今日水群榜', '今日发言排行', '今日B话榜'})
     async def show_daily_rank(self, event: AstrMessageEvent):
         """显示今日排行榜，别名：今日水群榜/今日发言排行/今日B话榜"""
