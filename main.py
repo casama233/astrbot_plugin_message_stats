@@ -24,7 +24,7 @@ from .utils.member_cache_manager import MemberCacheManager
 from .utils.event_snapshot import extract_group_message_snapshot
 from .utils.web_panel_mixin import WebPanelMixin
 from .utils.stats_mixin import StatsMixin
-from .utils.ranking_mixin import RankingMixin
+from .utils.ranking_mixin import CUSTOM_DATE_RANK_MESSAGE_PATTERN, RankingMixin
 from .utils.models import GroupInfo, PluginConfig, RankType, UserData
 from .utils.exception_handlers import ExceptionConfig, exception_handler
 from .utils.constants import (
@@ -556,6 +556,13 @@ class MessageStatsPlugin(Star):
             except Exception:
                 pass
             return
+        message_text = str(event.get_message_str() or "").strip()
+        if CUSTOM_DATE_RANK_MESSAGE_PATTERN.fullmatch(message_text):
+            try:
+                event.should_call_llm(False)
+            except Exception:
+                pass
+            return
         
         # 获取基本信息
         group_id = event.get_group_id()
@@ -703,9 +710,36 @@ class MessageStatsPlugin(Star):
 
     
     @filter.command("发言榜", alias={'水群榜', 'B话榜', '发言排行', '发言统计'})
-    async def show_full_rank(self, event: AstrMessageEvent):
-        """显示总排行榜，别名：水群榜/B话榜/发言排行/发言统计"""
-        async for result in self._show_rank(event, RankType.TOTAL):
+    async def show_full_rank(self, event: AstrMessageEvent, date_expr: str = ""):
+        """显示总排行榜，支持可选的指定日期或日期区间。"""
+        if date_expr:
+            try:
+                custom_period = self._parse_custom_rank_period(date_expr)
+            except ValueError as exc:
+                yield event.plain_result(str(exc))
+                async for result in self._yield_stop_command_event(event):
+                    yield result
+                return
+            async for result in self._show_rank(event, custom_period=custom_period):
+                yield result
+        else:
+            async for result in self._show_rank(event, RankType.TOTAL):
+                yield result
+        async for result in self._yield_stop_command_event(event):
+            yield result
+
+    @filter.regex(CUSTOM_DATE_RANK_MESSAGE_PATTERN)
+    async def show_custom_date_rank(self, event: AstrMessageEvent):
+        """显示指定单日或日期区间的排行榜。"""
+        try:
+            custom_period = self._parse_custom_rank_period(event.get_message_str())
+        except ValueError as exc:
+            event.should_call_llm(False)
+            yield event.plain_result(str(exc))
+            async for result in self._yield_stop_command_event(event):
+                yield result
+            return
+        async for result in self._show_rank(event, custom_period=custom_period):
             yield result
         async for result in self._yield_stop_command_event(event):
             yield result
