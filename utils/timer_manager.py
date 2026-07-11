@@ -774,21 +774,28 @@ class TimerManager:
 
         
         # 根据排行榜类型筛选数据
-        # 定时推送强制使用今日排行榜
         rank_type = self._parse_rank_type(rank_type_value or config.timer_rank_type)
+        rank_title = self._generate_title(rank_type)
         filtered_data = await self._filter_data_by_rank_type(group_data, rank_type)
         if not filtered_data:
-
-            # 今日无数据（如凌晨推送），回退到昨日数据
-            yesterday = datetime.now().date() - timedelta(days=1)
-            filtered_data = [(user, user.get_message_count_in_period(yesterday, yesterday)) for user in group_data if user.get_message_count_in_period(yesterday, yesterday) > 0]
-            if filtered_data:
-                self.logger.info(f"群组 {group_id} 今日无数据，回退到昨日({yesterday})数据")
+            if rank_type == RankType.DAILY:
+                # 今日无数据（如凌晨推送），回退到昨日数据
+                yesterday = datetime.now().date() - timedelta(days=1)
+                for user in group_data:
+                    count = user.get_message_count_in_period(yesterday, yesterday)
+                    if count > 0:
+                        filtered_data.append((user, count))
+                if filtered_data:
+                    rank_title = self._generate_title(RankType.YESTERDAY)
+                    self.logger.info(f"群组 {group_id} 今日无数据，回退到昨日({yesterday})数据")
+                else:
+                    self.logger.warning(f"群组 {group_id} 今日和昨日均无数据")
+                    return False
             else:
-                self.logger.warning(f"群组 {group_id} 今日和昨日均无数据")
+                self.logger.warning(f"群组 {group_id} {rank_title}无数据")
                 return False
         else:
-            self.logger.info(f"群组 {group_id} 定时推送使用今日排行榜")
+            self.logger.info(f"群组 {group_id} 定时推送使用{rank_title}")
         
         # 排序数据
         filtered_data.sort(key=lambda x: x[1], reverse=True)
@@ -812,7 +819,7 @@ class TimerManager:
         group_info.group_name = group_name
         
         # 生成标题
-        title = self._generate_title(rank_type)
+        title = rank_title
         
         # 定时推送只发送图片版本
         image_path = await self._generate_rank_image(users_for_rank, group_info, title, config, token_usage_info)
@@ -1048,6 +1055,10 @@ class TimerManager:
             '今日榜': RankType.DAILY,
             '日榜': RankType.DAILY,
             '今天': RankType.DAILY,
+            'yesterday': RankType.YESTERDAY,
+            '昨日榜': RankType.YESTERDAY,
+            '昨日': RankType.YESTERDAY,
+            '昨天': RankType.YESTERDAY,
             'week': RankType.WEEKLY,
             'weekly': RankType.WEEKLY,
             '本周榜': RankType.WEEKLY,
@@ -1123,6 +1134,9 @@ class TimerManager:
         """
         if rank_type == RankType.DAILY:
             return current_date, current_date
+        elif rank_type == RankType.YESTERDAY:
+            yesterday = current_date - timedelta(days=1)
+            return yesterday, yesterday
         elif rank_type == RankType.WEEKLY:
             # 获取本周开始日期(周一)
             week_start = get_week_start(current_date)
@@ -1161,6 +1175,9 @@ class TimerManager:
             return "总发言排行榜"
         elif rank_type == RankType.DAILY:
             return f"[{now.year}年{now.month}月{now.day}日]发言榜单"
+        elif rank_type == RankType.YESTERDAY:
+            yesterday = now - timedelta(days=1)
+            return f"[{yesterday.year}年{yesterday.month}月{yesterday.day}日]昨日发言榜单"
         elif rank_type == RankType.WEEKLY:
             # 计算周数
             week_num = now.isocalendar().week
