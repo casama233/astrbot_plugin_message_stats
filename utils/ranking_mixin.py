@@ -18,10 +18,25 @@ from .models import GroupInfo, PluginConfig, RankType, UserData
 from .platform_helper import PlatformHelper
 
 
+CUSTOM_RANK_DATE_TOKEN = r"\d{4}年\d{1,2}月\d{1,2}日"
+CUSTOM_RANK_PERIOD_PATTERN = (
+    rf"(?P<start>{CUSTOM_RANK_DATE_TOKEN})"
+    rf"(?:\s*(?:-|—|－|~|～|至|到)\s*(?P<end>{CUSTOM_RANK_DATE_TOKEN}))?"
+)
+CUSTOM_DATE_RANK_MESSAGE_PATTERN = re.compile(
+    rf"^(?:[#＃/／]\s*)?{CUSTOM_RANK_PERIOD_PATTERN}\s*发言榜$"
+)
+
+
 class RankingMixin:
     """排行榜数据准备、输出调度、文字格式化和 T2I 能力。"""
 
-    async def _show_rank(self, event: AstrMessageEvent, rank_type: RankType):
+    async def _show_rank(
+        self,
+        event: AstrMessageEvent,
+        rank_type: Optional[RankType] = None,
+        custom_period: Optional[tuple[date, date]] = None,
+    ):
         """显示排行榜 - 重构版本"""
         try:
             # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
@@ -34,9 +49,13 @@ class RankingMixin:
                 return
 
             # 准备数据
-            rank_data = await self._prepare_rank_data(event, rank_type)
+            rank_data = await self._prepare_rank_data(event, rank_type, custom_period)
             if rank_data is None:
-                yield event.plain_result("无法获取排行榜数据,请检查群组信息或稍后重试")
+                if custom_period:
+                    period_label = self._format_custom_rank_period(*custom_period)
+                    yield event.plain_result(f"{period_label}暂无发言记录")
+                else:
+                    yield event.plain_result("无法获取排行榜数据,请检查群组信息或稍后重试")
                 return
 
             group_id, current_user_id, filtered_data, config, title, group_info = rank_data
@@ -183,7 +202,12 @@ class RankingMixin:
             self.logger.error(f"数据格式错误: {e}")
             yield event.plain_result("数据格式错误,请联系管理员")
 
-    async def _prepare_rank_data(self, event: AstrMessageEvent, rank_type: RankType):
+    async def _prepare_rank_data(
+        self,
+        event: AstrMessageEvent,
+        rank_type: Optional[RankType],
+        custom_period: Optional[tuple[date, date]] = None,
+    ):
         """准备排行榜数据"""
         # 获取群组ID和用户ID
         group_id = event.get_group_id()
@@ -220,7 +244,16 @@ class RankingMixin:
 
 
         # 根据类型筛选数据并获取排序值
-        filtered_data_with_values = await self._filter_data_by_rank_type(group_data, rank_type)
+        if custom_period:
+            filtered_data_with_values = await self._calculate_period_rank_optimized(
+                group_data,
+                custom_period[0],
+                custom_period[1],
+            )
+        elif rank_type is not None:
+            filtered_data_with_values = await self._filter_data_by_rank_type(group_data, rank_type)
+        else:
+            return None
 
         if not filtered_data_with_values:
             return None
@@ -232,7 +265,10 @@ class RankingMixin:
         config = self.plugin_config
 
         # 生成标题
-        title = self._generate_title(rank_type)
+        if custom_period:
+            title = self._generate_custom_rank_title(*custom_period)
+        else:
+            title = self._generate_title(rank_type)
 
         # 创建群组信息
         unified_msg_origin = self.group_unified_msg_origins.get(group_id, "")
@@ -243,6 +279,54 @@ class RankingMixin:
         group_info.group_name = group_name
 
         return group_id, current_user_id, filtered_data, config, title, group_info
+
+    def _parse_custom_rank_period(self, query: str) -> tuple[date, date]:
+        """解析单日或日期区间排行榜查询。"""
+        text = str(query or "").strip()
+        text = re.sub(r"^(?:[#＃/／]\s*)", "", text)
+        text = re.sub(r"\s*发言榜$", "", text).strip()
+        match = re.fullmatch(CUSTOM_RANK_PERIOD_PATTERN, text)
+        if not match:
+            raise ValueError(
+                "日期格式错误，请使用“2026年6月1日”或"
+                "“2026年5月30日-2026年6月1日”"
+            )
+
+        try:
+            start_date = self._parse_custom_rank_date(match.group("start"))
+            end_date = (
+                self._parse_custom_rank_date(match.group("end"))
+                if match.group("end")
+                else start_date
+            )
+        except ValueError as exc:
+            raise ValueError("日期无效，请检查年月日") from exc
+
+        if start_date > end_date:
+            raise ValueError("开始日期不能晚于结束日期")
+        if end_date > date.today():
+            raise ValueError("不能查询未来日期的发言榜")
+        return start_date, end_date
+
+    @staticmethod
+    def _parse_custom_rank_date(value: str) -> date:
+        match = re.fullmatch(r"(\d{4})年(\d{1,2})月(\d{1,2})日", value)
+        if not match:
+            raise ValueError("invalid date format")
+        return date(*(int(part) for part in match.groups()))
+
+    @staticmethod
+    def _format_custom_rank_date(value: date) -> str:
+        return f"{value.year}年{value.month}月{value.day}日"
+
+    def _format_custom_rank_period(self, start_date: date, end_date: date) -> str:
+        start_text = self._format_custom_rank_date(start_date)
+        if start_date == end_date:
+            return start_text
+        return f"{start_text}—{self._format_custom_rank_date(end_date)}"
+
+    def _generate_custom_rank_title(self, start_date: date, end_date: date) -> str:
+        return f"[{self._format_custom_rank_period(start_date, end_date)}]发言榜单"
 
     async def _refresh_display_names_for_ranking(self, event: AstrMessageEvent, group_id: str, group_data):
         """排行榜显示前刷新当前群展示名，确保显示最新昵称"""

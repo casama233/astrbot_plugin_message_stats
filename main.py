@@ -24,7 +24,7 @@ from .utils.member_cache_manager import MemberCacheManager
 from .utils.event_snapshot import extract_group_message_snapshot
 from .utils.web_panel_mixin import WebPanelMixin
 from .utils.stats_mixin import StatsMixin
-from .utils.ranking_mixin import RankingMixin
+from .utils.ranking_mixin import CUSTOM_DATE_RANK_MESSAGE_PATTERN, RankingMixin
 from .utils.models import GroupInfo, PluginConfig, RankType, UserData
 from .utils.exception_handlers import ExceptionConfig, exception_handler
 from .utils.constants import (
@@ -49,7 +49,7 @@ def _install_feature_methods(*feature_classes):
     return decorator
 
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.1.8")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.1.9")
 @_install_feature_methods(WebPanelMixin, StatsMixin, RankingMixin)
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -548,6 +548,24 @@ class MessageStatsPlugin(Star):
     @filter.event_message_type(EventMessageType.ALL)
     async def auto_message_listener(self, event: AstrMessageEvent):
         """自动消息监听器 - 监听所有消息并记录群成员发言统计"""
+        # 日期在前的自然语言查询不能用 RegexFilter 注册，否则 AstrBot 后台会把
+        # 完整正则表达式展示成命令名；在消息监听器中识别可保留自然语法并避免该问题。
+        message_text = str(event.get_message_str() or "").strip()
+        if CUSTOM_DATE_RANK_MESSAGE_PATTERN.fullmatch(message_text):
+            try:
+                custom_period = self._parse_custom_rank_period(message_text)
+            except ValueError as exc:
+                event.should_call_llm(False)
+                yield event.plain_result(str(exc))
+                async for result in self._yield_stop_command_event(event):
+                    yield result
+                return
+            async for result in self._show_rank(event, custom_period=custom_period):
+                yield result
+            async for result in self._yield_stop_command_event(event):
+                yield result
+            return
+
         # 跳过命令消息
         if self._is_command_event(event):
             # 命令消息只交给 command handler 处理；同时关闭默认 LLM 回复，避免全量监听器让 is_wake=True
@@ -556,7 +574,7 @@ class MessageStatsPlugin(Star):
             except Exception:
                 pass
             return
-        
+
         # 获取基本信息
         group_id = event.get_group_id()
         user_id = event.get_sender_id()
@@ -703,13 +721,24 @@ class MessageStatsPlugin(Star):
 
     
     @filter.command("发言榜", alias={'水群榜', 'B话榜', '发言排行', '发言统计'})
-    async def show_full_rank(self, event: AstrMessageEvent):
-        """显示总排行榜，别名：水群榜/B话榜/发言排行/发言统计"""
-        async for result in self._show_rank(event, RankType.TOTAL):
-            yield result
+    async def show_full_rank(self, event: AstrMessageEvent, date_expr: str = ""):
+        """显示总排行榜，支持可选的指定日期或日期区间。"""
+        if date_expr:
+            try:
+                custom_period = self._parse_custom_rank_period(date_expr)
+            except ValueError as exc:
+                yield event.plain_result(str(exc))
+                async for result in self._yield_stop_command_event(event):
+                    yield result
+                return
+            async for result in self._show_rank(event, custom_period=custom_period):
+                yield result
+        else:
+            async for result in self._show_rank(event, RankType.TOTAL):
+                yield result
         async for result in self._yield_stop_command_event(event):
             yield result
-    
+
     @filter.command("今日发言榜", alias={'今日水群榜', '今日发言排行', '今日B话榜'})
     async def show_daily_rank(self, event: AstrMessageEvent):
         """显示今日排行榜，别名：今日水群榜/今日发言排行/今日B话榜"""
