@@ -5,6 +5,9 @@
 
 import json
 import asyncio
+import os
+import tempfile
+import uuid
 import aiofiles
 import aiofiles.os
 from pathlib import Path
@@ -22,6 +25,77 @@ from .constants import (
     CONFIG_CACHE_MAXSIZE,
     CONFIG_CACHE_TTL
 )
+
+
+def _atomic_write_text_sync(file_path: Path, content: str) -> None:
+    """将 UTF-8 文本写入同目录临时文件后原子替换正式文件。"""
+    file_path = Path(file_path)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        dir=str(file_path.parent),
+        prefix=f".{file_path.name}.",
+        suffix=".tmp",
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as file_obj:
+            fd = -1
+            file_obj.write(content)
+            file_obj.flush()
+            os.fsync(file_obj.fileno())
+        os.replace(temp_path, file_path)
+
+        # POSIX 上同步目录项，降低断电后 rename 丢失的概率；失败不影响已完成的替换。
+        if os.name == "posix":
+            try:
+                flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                directory_fd = os.open(str(file_path.parent), flags)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            except OSError:
+                pass
+    except Exception:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+async def _atomic_write_text(file_path: Path, content: str) -> None:
+    await asyncio.to_thread(_atomic_write_text_sync, file_path, content)
+
+
+async def _read_json_file(file_path: Path) -> Any:
+    """按原始字节读取并严格解码 JSON，确保 UTF-8 截断可被识别。"""
+    async with aiofiles.open(str(file_path), "rb") as file_obj:
+        raw = await file_obj.read()
+    content = raw.decode("utf-8")
+    return await asyncio.to_thread(json.loads, content)
+
+
+def _quarantine_corrupted_file_sync(file_path: Path) -> Optional[Path]:
+    """将损坏文件原样移动到同目录备份，避免解码后再次破坏原始字节。"""
+    file_path = Path(file_path)
+    if not file_path.exists():
+        return None
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    backup_path = file_path.with_name(
+        f"{file_path.name}.corrupt-{timestamp}-{uuid.uuid4().hex[:8]}.backup"
+    )
+    os.replace(file_path, backup_path)
+    return backup_path
+
+
+async def _quarantine_corrupted_file(file_path: Path) -> Optional[Path]:
+    return await asyncio.to_thread(_quarantine_corrupted_file_sync, file_path)
 
 
 class GroupDataStore:
@@ -77,9 +151,7 @@ class GroupDataStore:
             return []
         
         try:
-            async with aiofiles.open(str(file_path), 'r', encoding='utf-8') as f:
-                content = await f.read()
-                data = await asyncio.to_thread(json.loads, content)
+            data = await _read_json_file(file_path)
             
             # 转换为UserData对象列表
             users = []
@@ -107,7 +179,18 @@ class GroupDataStore:
             
             return users
             
-        except (IOError, json.JSONDecodeError) as e:
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            try:
+                backup_path = await _quarantine_corrupted_file(file_path)
+                self.logger.warning(
+                    f"群组 {group_id} 数据文件损坏，已隔离至 {backup_path}: {e}"
+                )
+            except OSError as backup_error:
+                self.logger.error(
+                    f"群组 {group_id} 数据文件损坏且隔离失败: {backup_error}"
+                )
+            return []
+        except OSError as e:
             self.logger.error(f"读取群组数据失败 {group_id}: {e}")
             return []
     
@@ -206,14 +289,15 @@ class GroupDataStore:
         existing_group_name = None
         if await aiofiles.os.path.exists(file_path):
             try:
-                async with aiofiles.open(str(file_path), 'r', encoding='utf-8') as f:
-                    content = await f.read()
-                    if content.strip():
-                        existing_data = json.loads(content)
-                        if isinstance(existing_data, dict):
-                            existing_group_name = existing_data.get('group_name')
-            except (json.JSONDecodeError, IOError):
-                pass
+                existing_data = await _read_json_file(file_path)
+                if isinstance(existing_data, dict):
+                    existing_group_name = existing_data.get('group_name')
+            except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                backup_path = await _quarantine_corrupted_file(file_path)
+                self.logger.warning(
+                    f"群组 {group_id} 数据文件损坏，已隔离至 {backup_path}，"
+                    f"将使用当前内存数据重建: {e}"
+                )
         
         # 准备数据（使用紧凑格式减少文件体积）
         data = {
@@ -229,8 +313,7 @@ class GroupDataStore:
         
         # 使用 indent=None 减少文件体积（约减少50%）
         json_content = await asyncio.to_thread(json.dumps, data, ensure_ascii=False, indent=None, separators=(',', ':'))
-        async with aiofiles.open(str(file_path), 'w', encoding='utf-8') as f:
-            await f.write(json_content)
+        await _atomic_write_text(file_path, json_content)
     
     async def flush_all(self):
         """立即将所有脏数据写入磁盘（插件关闭时调用）
@@ -270,26 +353,21 @@ class GroupDataStore:
             return False
         
         try:
-            # 读取文件内容
-            async with aiofiles.open(str(file_path), 'r', encoding='utf-8') as f:
-                content = await f.read()
-            
-            # 尝试解析JSON
+            await _read_json_file(file_path)
+            return True
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
             try:
-                await asyncio.to_thread(json.loads, content)
-                return True  # 文件正常
-            except json.JSONDecodeError:
-                # 文件损坏，创建备份
-                backup_path = file_path.with_suffix('.json.backup')
-                async with aiofiles.open(str(backup_path), 'w', encoding='utf-8') as f:
-                    await f.write(content)
-                
-                # 创建新的空数据文件
-                await self.save_group_data(group_id, [])
-                self.logger.warning(f"已修复损坏的群组数据文件 {group_id}，备份保存至 {backup_path}")
+                backup_path = await _quarantine_corrupted_file(file_path)
+                users, group_name = self._dirty_cache.get(group_id, ([], None))
+                await self._write_group_data_direct(group_id, users, group_name)
+                self.logger.warning(
+                    f"已修复损坏的群组数据文件 {group_id}，备份保存至 {backup_path}: {e}"
+                )
                 return True
-                
-        except (IOError, OSError) as e:
+            except OSError as repair_error:
+                self.logger.error(f"修复群组数据失败 {group_id}: {repair_error}")
+                return False
+        except OSError as e:
             self.logger.error(f"修复群组数据失败 {group_id}: {e}")
             return False
 
@@ -320,14 +398,22 @@ class ConfigManager:
             return default_config
         
         try:
-            async with aiofiles.open(str(self.config_file), 'r', encoding='utf-8') as f:
-                content = await f.read()
-                data = await asyncio.to_thread(json.loads, content)
+            data = await _read_json_file(self.config_file)
             
             # 转换为PluginConfig对象
             return PluginConfig.from_dict(data)
             
-        except (IOError, json.JSONDecodeError) as e:
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            try:
+                backup_path = await _quarantine_corrupted_file(self.config_file)
+                self.logger.warning(f"配置文件损坏，已隔离至 {backup_path}: {e}")
+            except OSError as backup_error:
+                self.logger.error(f"配置文件损坏且隔离失败: {backup_error}")
+                return PluginConfig()
+            default_config = PluginConfig()
+            await self.save_config(default_config)
+            return default_config
+        except OSError as e:
             self.logger.error(f"读取配置文件失败: {e}")
             # 返回默认配置
             return PluginConfig()
@@ -338,8 +424,7 @@ class ConfigManager:
             data = config.to_dict()
             
             json_content = await asyncio.to_thread(json.dumps, data, ensure_ascii=False, indent=2)
-            async with aiofiles.open(str(self.config_file), 'w', encoding='utf-8') as f:
-                await f.write(json_content)
+            await _atomic_write_text(self.config_file, json_content)
             
             return True
             
