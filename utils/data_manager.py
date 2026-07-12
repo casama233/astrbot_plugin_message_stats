@@ -536,21 +536,11 @@ class DataManager:
         if cache_key in self.config_cache:
             return self.config_cache[cache_key]
         
-        if await asyncio.to_thread(self.config_file.exists):
-            async with aiofiles.open(self.config_file, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                config_data = await asyncio.to_thread(json.loads, content)
-            
-            config = PluginConfig.from_dict(config_data)
-            
-            # 缓存配置
-            self.config_cache[cache_key] = config
-            return config
-        else:
-            # 如果配置文件不存在，创建默认配置
-            default_config = PluginConfig()
-            await self.save_config(default_config)
-            return default_config
+        config = await self.config_manager.load_config()
+
+        # 缓存配置
+        self.config_cache[cache_key] = config
+        return config
     
     @safe_config_operation(default_return=None)
     async def save_config(self, config: PluginConfig):
