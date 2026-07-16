@@ -9,7 +9,7 @@ import orjson
 
 from astrbot.api.star import StarTools
 
-from .group_id_utils import is_valid_group_id
+from .group_id_utils import is_placeholder_group_name, is_valid_group_id
 from .models import PluginConfig, RankType
 
 
@@ -208,7 +208,9 @@ class WebPanelMixin:
                 if fp2.exists():
                     s2 = os.path.getsize(str(fp2))
                     fs2 = f"{s2/1024:.1f}KB" if s2<1024*1024 else f"{s2/1024/1024:.1f}MB"
-                gn = self._web_group_name_cache.get(str(gid), f"群{gid}")
+                gn = self._web_group_name_cache.get(str(gid), str(gid))
+                if is_placeholder_group_name(gn, gid):
+                    gn = str(gid)
                 return self._jsonify({"status":"ok","data":{"group":{"group_id":gid,"group_name":gn,"display_name":f"{gn} - {gid}","file_size":fs2,"total_messages":tm,"user_count":len(act),"top_users":tu}}})
             gd = []
             ag = await self.data_manager.get_all_groups()
@@ -222,7 +224,9 @@ class WebPanelMixin:
                 if fp.exists():
                     s = os.path.getsize(str(fp))
                     fs = f"{s/1024:.1f}KB" if s<1024*1024 else f"{s/1024/1024:.1f}MB"
-                gn = self._web_group_name_cache.get(str(g2), f"群{g2}")
+                gn = self._web_group_name_cache.get(str(g2), str(g2))
+                if is_placeholder_group_name(gn, g2):
+                    gn = str(g2)
                 tm = sum(u.message_count for u in ac)
                 gd.append({"group_id":g2,"group_name":gn,"display_name":f"{gn} - {g2}","file_size":fs,"total_messages":tm,"user_count":len(ac)})
             # 按总发言数降序排序

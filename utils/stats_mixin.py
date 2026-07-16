@@ -15,7 +15,7 @@ from .exception_handlers import (
 from .models import GroupInfo, UserData
 from .platform_helper import PlatformHelper
 from .validators import Validators
-from .group_id_utils import extract_numeric_group_id, normalize_group_id
+from .group_id_utils import extract_numeric_group_id, is_placeholder_group_name, normalize_group_id
 
 
 class StatsMixin:
@@ -58,7 +58,11 @@ class StatsMixin:
                 with open(str(self._group_names_file), 'r', encoding='utf-8') as f:
                     data = orjson.loads(f.read())
                 if isinstance(data, dict):
-                    self._web_group_name_cache = data
+                    self._web_group_name_cache = {
+                        str(group_id): str(group_name).strip()
+                        for group_id, group_name in data.items()
+                        if not is_placeholder_group_name(group_name, group_id)
+                    }
                     self.logger.info(f"已加载群组名称缓存: {len(data)} 条记录")
         except Exception as e:
             self.logger.debug(f"加载群组名称文件失败: {e}")
@@ -150,7 +154,7 @@ class StatsMixin:
 
         group_id_str = str(group_id)
         group_name = str(group_name).strip()
-        if not group_name:
+        if is_placeholder_group_name(group_name, group_id_str):
             return None
 
         old_name = self._web_group_name_cache.get(group_id_str)

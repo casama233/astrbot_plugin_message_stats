@@ -17,7 +17,7 @@ from astrbot.api import logger as astrbot_logger
 from cachetools import TTLCache
 
 from .models import UserData, PluginConfig, MessageDate
-from .group_id_utils import group_id_to_filename_stem
+from .group_id_utils import group_id_to_filename_stem, is_placeholder_group_name
 
 # 从集中管理的常量模块导入缓存配置
 from .constants import (
@@ -293,6 +293,8 @@ class GroupDataStore:
                 existing_data = await _read_json_file(file_path)
                 if isinstance(existing_data, dict):
                     existing_group_name = existing_data.get('group_name')
+                    if is_placeholder_group_name(existing_group_name, group_id):
+                        existing_group_name = None
             except (UnicodeDecodeError, json.JSONDecodeError) as e:
                 backup_path = await _quarantine_corrupted_file(file_path)
                 self.logger.warning(
@@ -309,7 +311,7 @@ class GroupDataStore:
         
         # 如果提供了新的 group_name，使用新的；否则保留原有的
         final_group_name = group_name or existing_group_name
-        if final_group_name:
+        if final_group_name and not is_placeholder_group_name(final_group_name, group_id):
             data['group_name'] = final_group_name
         
         # 使用 indent=None 减少文件体积（约减少50%）

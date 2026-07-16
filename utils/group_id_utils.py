@@ -8,6 +8,7 @@ from typing import Any
 
 
 _NUMERIC_ID_RE = re.compile(r"-?\d+")
+_OFFICIAL_QQ_OPENID_RE = re.compile(r"[A-F0-9]{24,64}")
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]")
 _LEGACY_NUMERIC_GROUP_ID_RE = re.compile(r"-?\d+")
 
@@ -45,6 +46,21 @@ def extract_numeric_group_id(group_id: Any) -> str:
     group_id_str = normalize_group_id(group_id)
     matches = _NUMERIC_ID_RE.findall(group_id_str)
     return matches[-1] if matches else ""
+
+
+def is_placeholder_group_name(value: Any, group_id: Any = None) -> bool:
+    """Return whether a value is an id/openid placeholder, not a real name."""
+    text = normalize_group_id(value)
+    if not text:
+        return True
+
+    group_id_str = normalize_group_id(group_id)
+    if group_id_str and text in {group_id_str, f"群{group_id_str}"}:
+        return True
+
+    if text.startswith("群") and _OFFICIAL_QQ_OPENID_RE.fullmatch(text[1:]):
+        return True
+    return bool(_OFFICIAL_QQ_OPENID_RE.fullmatch(text))
 
 
 def group_id_to_filename_stem(group_id: Any) -> str:

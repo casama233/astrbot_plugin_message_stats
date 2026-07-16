@@ -38,6 +38,7 @@ from .image_generator import ImageGenerator
 from .llm_analyzer import LLMAnalyzer
 from .date_utils import get_current_date, get_week_start, get_month_start
 from .exception_handlers import safe_timer_operation, safe_generation, safe_data_operation
+from .group_id_utils import is_placeholder_group_name
 
 
 class TimerTaskStatus(Enum):
@@ -587,7 +588,7 @@ class TimerManager:
         # 1. 优先从内存缓存获取
         if group_id_str in self._group_name_cache:
             cached_name = self._group_name_cache[group_id_str]
-            if cached_name:
+            if cached_name and not is_placeholder_group_name(cached_name, group_id_str):
                 return cached_name
         
         try:
@@ -600,8 +601,9 @@ class TimerManager:
                         group_names = json.loads(content)
                         if isinstance(group_names, dict) and group_names.get(group_id_str):
                             group_name = str(group_names[group_id_str]).strip()
-                            self._group_name_cache[group_id_str] = group_name
-                            return group_name
+                            if not is_placeholder_group_name(group_name, group_id_str):
+                                self._group_name_cache[group_id_str] = group_name
+                                return group_name
 
             # 3. 从数据文件获取群组名称
             group_file_path = self.data_manager.group_store._get_group_file_path(group_id)
@@ -616,8 +618,9 @@ class TimerManager:
                         if isinstance(data, dict) and data.get('group_name'):
                             group_name = str(data['group_name']).strip()
                             # 更新到内存缓存
-                            self._group_name_cache[group_id_str] = group_name
-                            return group_name
+                            if not is_placeholder_group_name(group_name, group_id_str):
+                                self._group_name_cache[group_id_str] = group_name
+                                return group_name
                         
                         # 尝试从用户数据中推断群组名称
                         if isinstance(data, list) and len(data) > 0:
@@ -626,21 +629,23 @@ class TimerManager:
                                 for key in ['group_name', 'group_name_cn', '群名', '群组名', 'name', 'title']:
                                     if key in first_user and first_user[key]:
                                         group_name = str(first_user[key]).strip()
-                                        self._group_name_cache[group_id_str] = group_name
-                                        return group_name
+                                        if not is_placeholder_group_name(group_name, group_id_str):
+                                            self._group_name_cache[group_id_str] = group_name
+                                            return group_name
                         elif isinstance(data, dict):
                             for key in ['group_name', 'group_name_cn', '群名', '群组名', 'name', 'title']:
                                 if key in data and data[key]:
                                     group_name = str(data[key]).strip()
-                                    self._group_name_cache[group_id_str] = group_name
-                                    return group_name
+                                    if not is_placeholder_group_name(group_name, group_id_str):
+                                        self._group_name_cache[group_id_str] = group_name
+                                        return group_name
             
             # 4. 返回默认格式
-            return f"群{group_id}"
+            return str(group_id)
             
         except (OSError, IOError, ValueError, TypeError, KeyError, json.JSONDecodeError) as e:
             self.logger.debug(f"获取群组 {group_id} 名称时发生错误: {e}")
-            return f"群{group_id}"
+            return str(group_id)
     
     @safe_data_operation(default_return=False)
     async def _push_to_group(self, group_id: str, config, rank_type_value: str = None) -> bool:

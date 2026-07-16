@@ -55,6 +55,7 @@ except ImportError:
 
 from .models import UserData, GroupInfo, PluginConfig
 from .exception_handlers import safe_generation, safe_file_operation
+from .group_id_utils import is_placeholder_group_name
 
 
 
@@ -1081,7 +1082,7 @@ class ImageGenerator:
             
             # 准备模板数据
             avatar_url = self._get_avatar_url(user_id, nickname, group_info)
-            group_name = group_info.group_name or f"群{group_info.group_id}"
+            group_name = self._get_display_group_name(group_info)
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             template_data = {
@@ -1205,7 +1206,7 @@ class ImageGenerator:
             llm_token_text = f"LLM Token 消耗: {llm_token_usage.get('total_tokens', 0)} (输入{llm_token_usage.get('prompt_tokens', 0)}+输出{llm_token_usage.get('completion_tokens', 0)})"
         
         template_data = {
-            'group_name': self._escape_html_safe(group_info.group_name or f"群{group_info.group_id}"),
+            'group_name': self._escape_html_safe(self._get_display_group_name(group_info)),
             'group_id': self._escape_html_safe(str(group_info.group_id)),
             'title': self._escape_html_safe(title),
             'total_messages': self._escape_html_safe(str(total_messages)),
@@ -1402,7 +1403,7 @@ class ImageGenerator:
         
         # 准备模板数据
         template_data = {
-            'group_name': self._escape_html_safe(group_info.group_name or f"群{group_info.group_id}"),
+            'group_name': self._escape_html_safe(self._get_display_group_name(group_info)),
             'group_id': self._escape_html_safe(str(group_info.group_id)),
             'title': self._escape_html_safe(title),
             'custom_font_css': self._get_custom_font_css()
@@ -1647,6 +1648,14 @@ class ImageGenerator:
                 return 'discord'
         
         return 'unknown'
+
+    @staticmethod
+    def _get_display_group_name(group_info: GroupInfo) -> str:
+        group_id = str(group_info.group_id) if group_info else ""
+        group_name = getattr(group_info, "group_name", "") if group_info else ""
+        if not is_placeholder_group_name(group_name, group_id):
+            return str(group_name).strip()
+        return group_id
 
     async def _prefetch_avatars(self, users: List[UserData], group_info: GroupInfo):
         """预获取本批用户的头像URL，填充到 _avatar_cache

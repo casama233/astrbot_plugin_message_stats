@@ -56,6 +56,16 @@ def _read_first_text(source: Any, keys: Iterable[str]) -> Optional[str]:
     return None
 
 
+def _iter_nested_sources(source: Any, keys: Iterable[str]) -> Iterable[Any]:
+    for key in keys:
+        nested = _read_value(source, key)
+        if nested is not None:
+            yield nested
+            user = _read_value(nested, "user")
+            if user is not None:
+                yield user
+
+
 def _iter_sources(event: Any) -> Iterable[Any]:
     if event is None:
         return
@@ -111,23 +121,26 @@ def extract_group_message_snapshot(event: Any, user_id: str) -> GroupMessageSnap
     avatar_url = None
 
     for source in _iter_sources(event):
-        sender = _read_value(source, "sender")
-        if sender is not None:
-            if card is None:
-                card = _read_first_text(sender, CARD_KEYS)
-            if base_nickname is None:
-                base_nickname = _read_first_text(sender, NICKNAME_KEYS)
-            if avatar_url is None:
-                avatar_url = _read_first_text(sender, AVATAR_URL_KEYS)
+        person_sources = [source]
+        person_sources.extend(_iter_nested_sources(source, (
+            "sender",
+            "author",
+            "member",
+            "user",
+            "from_user",
+            "operator",
+        )))
 
-        if card is None:
-            card = _read_first_text(source, CARD_KEYS)
-        if base_nickname is None:
-            base_nickname = _read_first_text(source, NICKNAME_KEYS)
+        for person in person_sources:
+            if card is None:
+                card = _read_first_text(person, CARD_KEYS)
+            if base_nickname is None:
+                base_nickname = _read_first_text(person, NICKNAME_KEYS)
+            if avatar_url is None:
+                avatar_url = _read_first_text(person, AVATAR_URL_KEYS)
+
         if group_name is None:
             group_name = _read_first_text(source, GROUP_NAME_KEYS)
-        if avatar_url is None:
-            avatar_url = _read_first_text(source, AVATAR_URL_KEYS)
 
         if card and base_nickname and group_name and avatar_url:
             break
