@@ -394,7 +394,7 @@
         <!-- Header -->
         <div class="header">
             {% if group_name %}
-            <div class="group-info-row"><div class="group-info">✏️ {{ group_name }} · {{ group_id }}</div></div>
+            <div class="group-info-row"><div class="group-info">✏️ {{ group_name }}{% if show_group_id %} · {{ group_id }}{% endif %}</div></div>
             {% endif %}
             {% if ']' in title %}
             {% set title_parts = title.split(']', 1) %}

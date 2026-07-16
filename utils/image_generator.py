@@ -55,7 +55,7 @@ except ImportError:
 
 from .models import UserData, GroupInfo, PluginConfig
 from .exception_handlers import safe_generation, safe_file_operation
-from .group_id_utils import is_placeholder_group_name
+from .group_id_utils import get_fallback_group_name, is_official_qq_openid, is_placeholder_group_name
 
 
 
@@ -1089,7 +1089,12 @@ class ImageGenerator:
                 'avatar_url': avatar_url,
                 'nickname': self._escape_html_safe(nickname),
                 'user_id': self._escape_html_safe(str(user_id)),
-                'group_name': self._escape_html_safe(f"{group_name}[{group_info.group_id}]"),
+                'group_name': self._escape_html_safe(
+                    f"{group_name}[{group_info.group_id}]"
+                    if not is_official_qq_openid(group_info.group_id)
+                    else group_name
+                ),
+            'show_group_id': not is_official_qq_openid(group_info.group_id),
                 'milestone_count': milestone_count,
                 'rank': rank,
                 'daily_count': daily_count,
@@ -1208,6 +1213,7 @@ class ImageGenerator:
         template_data = {
             'group_name': self._escape_html_safe(self._get_display_group_name(group_info)),
             'group_id': self._escape_html_safe(str(group_info.group_id)),
+            'show_group_id': not is_official_qq_openid(group_info.group_id),
             'title': self._escape_html_safe(title),
             'total_messages': self._escape_html_safe(str(total_messages)),
             'user_count': self._escape_html_safe(str(len(users))),
@@ -1405,6 +1411,7 @@ class ImageGenerator:
         template_data = {
             'group_name': self._escape_html_safe(self._get_display_group_name(group_info)),
             'group_id': self._escape_html_safe(str(group_info.group_id)),
+            'show_group_id': not is_official_qq_openid(group_info.group_id),
             'title': self._escape_html_safe(title),
             'custom_font_css': self._get_custom_font_css()
         }
@@ -1467,7 +1474,7 @@ class ImageGenerator:
 </head>
 <body>
     <div class="container">
-        <div class="title">{{ group_name }}[{{ group_id }}]</div>
+        <div class="title">{{ group_name }}{% if show_group_id %}[{{ group_id }}]{% endif %}</div>
         <div class="subtitle">{{ title }}</div>
         <div class="empty-text">
             暂无发言数据
@@ -1655,7 +1662,7 @@ class ImageGenerator:
         group_name = getattr(group_info, "group_name", "") if group_info else ""
         if not is_placeholder_group_name(group_name, group_id):
             return str(group_name).strip()
-        return group_id
+        return get_fallback_group_name(group_id)
 
     async def _prefetch_avatars(self, users: List[UserData], group_info: GroupInfo):
         """预获取本批用户的头像URL，填充到 _avatar_cache
@@ -2071,7 +2078,7 @@ class ImageGenerator:
     </style>
 </head>
 <body>
-    <div class="title">{{ group_name }}[{{ group_id }}]</div>
+    <div class="title">{{ group_name }}{% if show_group_id %}[{{ group_id }}]{% endif %}</div>
     <div class="title">{{ title }}</div>
     <div class="user-list">
         {{ user_items }}
@@ -2238,7 +2245,7 @@ class ImageGenerator:
     </style>
 </head>
 <body>
-    <div class="title">{{ group_name }}[{{ group_id }}]</div>
+    <div class="title">{{ group_name }}{% if show_group_id %}[{{ group_id }}]{% endif %}</div>
     <div class="title">{{ title }}</div>
     <div class="user-list">
         {{ user_items }}

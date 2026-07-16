@@ -63,6 +63,19 @@ def is_placeholder_group_name(value: Any, group_id: Any = None) -> bool:
     return bool(_OFFICIAL_QQ_OPENID_RE.fullmatch(text))
 
 
+def is_official_qq_openid(value: Any) -> bool:
+    """Return whether a value looks like an official QQ Bot openid."""
+    return bool(_OFFICIAL_QQ_OPENID_RE.fullmatch(normalize_group_id(value)))
+
+
+def get_fallback_group_name(group_id: Any) -> str:
+    """Return a user-friendly fallback when a real group name is unavailable."""
+    group_id_str = normalize_group_id(group_id)
+    if is_official_qq_openid(group_id_str):
+        return "群聊"
+    return group_id_str
+
+
 def group_id_to_filename_stem(group_id: Any) -> str:
     """Convert any group id into a safe, deterministic JSON filename stem."""
     group_id_str = normalize_group_id(group_id)

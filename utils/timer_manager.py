@@ -38,7 +38,7 @@ from .image_generator import ImageGenerator
 from .llm_analyzer import LLMAnalyzer
 from .date_utils import get_current_date, get_week_start, get_month_start
 from .exception_handlers import safe_timer_operation, safe_generation, safe_data_operation
-from .group_id_utils import is_placeholder_group_name
+from .group_id_utils import get_fallback_group_name, is_placeholder_group_name
 
 
 class TimerTaskStatus(Enum):
@@ -641,11 +641,11 @@ class TimerManager:
                                         return group_name
             
             # 4. 返回默认格式
-            return str(group_id)
+            return get_fallback_group_name(group_id)
             
         except (OSError, IOError, ValueError, TypeError, KeyError, json.JSONDecodeError) as e:
             self.logger.debug(f"获取群组 {group_id} 名称时发生错误: {e}")
-            return str(group_id)
+            return get_fallback_group_name(group_id)
     
     @safe_data_operation(default_return=False)
     async def _push_to_group(self, group_id: str, config, rank_type_value: str = None) -> bool:

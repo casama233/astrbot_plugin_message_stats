@@ -16,7 +16,7 @@ from .image_generator import ImageGenerationError
 from .llm_analyzer import LLMAnalyzer
 from .models import GroupInfo, PluginConfig, RankType, UserData
 from .platform_helper import PlatformHelper
-from .group_id_utils import is_placeholder_group_name
+from .group_id_utils import get_fallback_group_name, is_placeholder_group_name
 
 
 CUSTOM_RANK_DATE_TOKEN = r"\d{4}年\d{1,2}月\d{1,2}日"
@@ -82,7 +82,7 @@ class RankingMixin:
                             max_retries=max_retries
                         )
 
-                        grp_name = group_info.group_name if not is_placeholder_group_name(group_info.group_name, group_id) else str(group_id)
+                        grp_name = group_info.group_name if not is_placeholder_group_name(group_info.group_name, group_id) else get_fallback_group_name(group_id)
 
                         # 修复：llm_title 可能存为空字符串 ""（旧数据污染），统一视为无头衔处理
                         # 同时无头衔用户也需要满足 min_daily_messages 才触发 LLM，避免低发言用户频繁触发
