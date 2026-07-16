@@ -1279,7 +1279,7 @@ class ImageGenerator:
                 'nickname': user.nickname,
                 'title': user_title,
                 'title_color': user_title_color,
-                'avatar_url': self._get_avatar_url(user.user_id, user.nickname, self._current_group_info),
+                'avatar_url': self._get_avatar_url(user, user.nickname, self._current_group_info),
                 'total': user_messages,
                 'percentage': (user_messages / total_messages * 100) if total_messages > 0 else 0,
                 'fill_ratio': (user_messages / max_messages * 100) if max_messages > 0 else 0,
@@ -1299,7 +1299,7 @@ class ImageGenerator:
                 user_items.append({
                     'rank': current_rank,
                     'nickname': current_user_data.nickname,
-                    'avatar_url': self._get_avatar_url(current_user_data.user_id, current_user_data.nickname, self._current_group_info),
+                    'avatar_url': self._get_avatar_url(current_user_data, current_user_data.nickname, self._current_group_info),
                     'total': current_user_messages,
                     'percentage': (current_user_messages / total_messages * 100) if total_messages > 0 else 0,
                     'last_date': current_user_data.last_date or "未知",
@@ -1821,6 +1821,13 @@ class ImageGenerator:
         Returns:
             str: 头像URL
         """
+        if hasattr(user_id, "avatar_url"):
+            avatar_url = self._validate_url_safe(str(getattr(user_id, "avatar_url", "") or ""))
+            if avatar_url:
+                return avatar_url
+            nickname = nickname or getattr(user_id, "nickname", "")
+            user_id = getattr(user_id, "user_id", "")
+
         user_id_str = str(user_id)
         group_id_str = str(group_info.group_id) if group_info else ""
         platform = self._detect_platform(group_id_str)

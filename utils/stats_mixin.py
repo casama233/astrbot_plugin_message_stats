@@ -243,7 +243,7 @@ class StatsMixin:
         except (AttributeError, KeyError, TypeError):
             return False
 
-    async def _record_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None):
+    async def _record_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None, avatar_url: Optional[str] = None):
         """记录消息统计
 
         内部方法,用于记录群成员的消息统计数据.会自动验证输入参数并更新数据.
@@ -282,7 +282,7 @@ class StatsMixin:
             group_id, user_id, nickname = validated_data
 
             # 步骤3: 处理消息统计和记录
-            await self._process_message_stats(group_id, user_id, nickname, group_name)
+            await self._process_message_stats(group_id, user_id, nickname, group_name, avatar_url)
 
         except Exception as e:
             self.logger.error(f"记录消息统计失败({type(e).__name__}): {e}", exc_info=True)
@@ -312,7 +312,7 @@ class StatsMixin:
 
         return group_id, user_id, nickname
 
-    async def _process_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None):
+    async def _process_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None, avatar_url: Optional[str] = None):
         """处理消息统计和记录
 
         执行实际的消息统计更新操作，并记录结果日志。
@@ -330,6 +330,7 @@ class StatsMixin:
             user_id,
             nickname,
             group_name=group_name,
+            avatar_url=avatar_url,
         )
 
         if success:
@@ -588,6 +589,10 @@ class StatsMixin:
             # 如果事件对象获取失败或 event 为 None，使用 PlatformHelper 统一通过API获取（跨平台通用）
             helper = PlatformHelper(event, self.context)
             group_name = await helper.get_group_name(group_id)
+            if not group_name:
+                numeric_group_id = extract_numeric_group_id(group_id_str)
+                if numeric_group_id and numeric_group_id != group_id_str:
+                    group_name = await helper.get_group_name(numeric_group_id)
             remembered_group_name = self._remember_group_name(group_id_str, group_name)
             if remembered_group_name:
                 return remembered_group_name

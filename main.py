@@ -600,7 +600,7 @@ class MessageStatsPlugin(Star):
         # 获取用户昵称并记录统计
         snapshot = extract_group_message_snapshot(event, user_id)
         await self._cache_group_name(event, group_id, snapshot.group_name)
-        await self._record_message_stats(group_id, user_id, snapshot.nickname, snapshot.group_name)
+        await self._record_message_stats(group_id, user_id, snapshot.nickname, snapshot.group_name, snapshot.avatar_url)
     
     # ========== 排行榜命令 ==========
 
@@ -875,7 +875,7 @@ class MessageStatsPlugin(Star):
             if self.image_generator:
                 # 预获取真实头像
                 await self.image_generator._prefetch_avatars([target_user_data], group_info)
-                avatar_url = self.image_generator._get_avatar_url(target_uid, nickname, group_info)
+                avatar_url = self.image_generator._get_avatar_url(target_user_data, nickname, group_info)
                 
             data = {
                 'nickname': nickname,

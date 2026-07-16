@@ -270,6 +270,7 @@ class UserData:
     last_date: Optional[str] = None
     first_message_time: Optional[int] = None
     last_message_time: Optional[int] = None
+    avatar_url: Optional[str] = None
     # 按天聚合的字典 {date_str: count}，替代 history 列表存储
     # 10万条消息最多365个键值对，内存占用从O(n)降到O(365)
     _message_dates: Dict[str, int] = field(default_factory=dict)
@@ -386,6 +387,8 @@ class UserData:
             "first_message_time": self.first_message_time,
             "last_message_time": self.last_message_time
         }
+        if self.avatar_url:
+            result["avatar_url"] = self.avatar_url
         # 持久化头衔字段
         if self.llm_title:
             result["llm_title"] = self.llm_title
@@ -418,7 +421,8 @@ class UserData:
             message_count=data.get("message_count", 0),
             last_date=data.get("last_date"),
             first_message_time=data.get("first_message_time"),
-            last_message_time=data.get("last_message_time")
+            last_message_time=data.get("last_message_time"),
+            avatar_url=data.get("avatar_url")
         )
         
         # 重建 _message_dates（兼容新旧格式）
