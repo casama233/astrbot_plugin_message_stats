@@ -15,6 +15,7 @@ from .exception_handlers import (
 from .models import GroupInfo, UserData
 from .platform_helper import PlatformHelper
 from .validators import Validators
+from .group_id_utils import extract_numeric_group_id, normalize_group_id
 
 
 class StatsMixin:
@@ -538,7 +539,11 @@ class StatsMixin:
 
     def _is_blocked_group(self, group_id: str) -> bool:
         """检查群聊是否在屏蔽列表中（使用 set 缓存，O(1) 查询）"""
-        return str(group_id) in self._blocked_group_set
+        group_id_str = normalize_group_id(group_id)
+        if group_id_str in self._blocked_group_set:
+            return True
+        numeric_group_id = extract_numeric_group_id(group_id_str)
+        return bool(numeric_group_id and numeric_group_id in self._blocked_group_set)
 
     async def _get_group_members_cache(self, event: AstrMessageEvent, group_id: str) -> Optional[List[Dict[str, Any]]]:
         """获取群成员缓存（委托给 MemberCacheManager）"""

@@ -17,6 +17,7 @@ from astrbot.api import logger as astrbot_logger
 from cachetools import TTLCache
 
 from .models import UserData, PluginConfig, MessageDate
+from .group_id_utils import group_id_to_filename_stem
 
 # 从集中管理的常量模块导入缓存配置
 from .constants import (
@@ -139,7 +140,7 @@ class GroupDataStore:
     
     def _get_group_file_path(self, group_id: str) -> Path:
         """获取群组数据文件路径"""
-        return self.groups_dir / f"{group_id}.json"
+        return self.groups_dir / f"{group_id_to_filename_stem(group_id)}.json"
     
     async def load_group_data(self, group_id: str) -> List[UserData]:
         """加载群组数据"""

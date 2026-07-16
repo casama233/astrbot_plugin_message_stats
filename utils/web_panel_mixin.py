@@ -1,6 +1,5 @@
 """Web 面板、字体管理和相关数据查询能力。"""
 
-import re
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
@@ -10,6 +9,7 @@ import orjson
 
 from astrbot.api.star import StarTools
 
+from .group_id_utils import is_valid_group_id
 from .models import PluginConfig, RankType
 
 
@@ -48,7 +48,7 @@ class WebPanelMixin:
         return mapping.get(rank_type_str, RankType.TOTAL)
 
     def _is_valid_group_id(self, group_id: str) -> bool:
-        return bool(re.fullmatch(r"-?\d{5,32}", str(group_id or "")))
+        return is_valid_group_id(group_id)
 
     async def _is_existing_group_id(self, group_id: str) -> bool:
         return str(group_id) in {str(gid) for gid in await self.data_manager.get_all_groups()}
@@ -203,7 +203,7 @@ class WebPanelMixin:
                         pct = (u.message_count/tm*100) if tm>0 else 0
                         tu.append({"nickname":u.nickname,"message_count":u.message_count,"title":u.llm_title or u.display_title or "","title_color":u.llm_title_color or u.display_title_color or "","last_date":u.last_date or "","percentage":round(pct,1)})
 
-                fp2 = self.data_manager.groups_dir / f"{gid}.json"
+                fp2 = self.data_manager.group_store._get_group_file_path(gid)
                 fs2 = ""
                 if fp2.exists():
                     s2 = os.path.getsize(str(fp2))
@@ -217,7 +217,7 @@ class WebPanelMixin:
                 if not us: continue
                 ac = [u for u in us if u.message_count>0]
                 ac.sort(key=lambda x:x.message_count,reverse=True)
-                fp = self.data_manager.groups_dir / f"{g2}.json"
+                fp = self.data_manager.group_store._get_group_file_path(g2)
                 fs = ""
                 if fp.exists():
                     s = os.path.getsize(str(fp))

@@ -604,7 +604,7 @@ class TimerManager:
                             return group_name
 
             # 3. 从数据文件获取群组名称
-            group_file_path = self.data_manager.groups_dir / f"{group_id}.json"
+            group_file_path = self.data_manager.group_store._get_group_file_path(group_id)
             
             if os.path.exists(group_file_path):
                 async with aiofiles.open(group_file_path, 'r', encoding='utf-8') as f:
