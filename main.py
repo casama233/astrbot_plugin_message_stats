@@ -33,8 +33,7 @@ from .utils.constants import (
 )
 
 
-def _install_feature_methods(*feature_classes):
-    """Attach split feature methods without adding framework-visible base classes."""
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.1.7")
 
     def decorator(plugin_class):
         for feature_class in feature_classes:
@@ -597,11 +596,309 @@ class MessageStatsPlugin(Star):
         # 收集群组的unified_msg_origin（重要：用于定时推送）
         await self._collect_group_unified_msg_origin(event)
         
+        # 检测消息是否包含贴图/表情包/图片组件
+        is_sticker = self._is_sticker_message(event)
+        
         # 获取用户昵称并记录统计
         snapshot = extract_group_message_snapshot(event, user_id)
         await self._cache_group_name(event, group_id, snapshot.group_name)
-        await self._record_message_stats(group_id, user_id, snapshot.nickname, snapshot.group_name, snapshot.avatar_url)
+        await self._record_message_stats(group_id, user_id, snapshot.nickname, snapshot.group_name, is_sticker=is_sticker)
     
+    def _is_bot_message(self, event: AstrMessageEvent, user_id: str) -> bool:
+        """检查是否为机器人消息"""
+        try:
+            self_id = event.get_self_id()
+            return self_id and user_id == str(self_id)
+        except (AttributeError, KeyError, TypeError):
+            return False
+    
+    def _is_sticker_message(self, event: AstrMessageEvent) -> bool:
+        """检测消息是否包含贴图/表情包/图片组件
+        
+        遍历消息链中的所有组件，检查是否包含图片或贴图类型的组件。
+        支持的组件类型：Image（图片）、Face（QQ表情）、Sticker（贴图）等。
+        
+        Args:
+            event: 消息事件对象
+            
+        Returns:
+            bool: 是否为贴图/表情包消息
+        """
+        try:
+            message_obj = getattr(event, 'message_obj', None)
+            if not message_obj:
+                return False
+            
+            message_chain = getattr(message_obj, 'message', [])
+            if not message_chain:
+                return False
+            
+            # 常见的贴图/图片组件类型名
+            sticker_component_names = {'Image', 'Face', 'Sticker', 'image', 'face', 'sticker'}
+            
+            for comp in message_chain:
+                comp_type = type(comp).__name__
+                if comp_type in sticker_component_names:
+                    return True
+            return False
+        except Exception:
+            return False
+    
+    async def _record_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None, is_sticker: bool = False):
+        """记录消息统计
+        
+        内部方法,用于记录群成员的消息统计数据.会自动验证输入参数并更新数据.
+        
+        Args:
+            group_id (str): 群组ID,必须是5-12位数字字符串
+            user_id (str): 用户ID,必须是1-20位数字字符串
+            nickname (str): 用户昵称,会进行HTML转义和安全验证
+            
+        Raises:
+            ValueError: 当参数验证失败时抛出
+            TypeError: 当参数类型错误时抛出
+            KeyError: 当数据格式错误时抛出
+            
+        Returns:
+            None: 无返回值,记录结果通过日志输出
+            
+        Example:
+            >>> await self._record_message_stats("123456789", "987654321", "用户昵称")
+            # 将在数据管理器中更新该用户的发言统计
+        """
+        try:
+            # 步骤0: 检查是否为屏蔽用户
+            if self._is_blocked_user(user_id):
+                if self.plugin_config.detailed_logging_enabled:
+                    self.logger.debug(f"用户 {user_id} 在屏蔽列表中，跳过统计")
+                return
+            
+            # 步骤1: 安全处理昵称，确保不为空
+            if not nickname or not nickname.strip():
+                nickname = f"用户{user_id}"
+                self.logger.warning(f"昵称获取失败，使用默认昵称: {nickname}")
+            
+            # 步骤2: 验证输入数据
+            validated_data = await self._validate_message_data(group_id, user_id, nickname)
+            group_id, user_id, nickname = validated_data
+            
+            # 步骤3: 处理消息统计和记录
+            await self._process_message_stats(group_id, user_id, nickname, group_name, is_sticker=is_sticker)
+            
+        except Exception as e:
+            self.logger.error(f"记录消息统计失败({type(e).__name__}): {e}", exc_info=True)
+    
+    @data_operation_handler('validate', '消息数据参数')
+    async def _validate_message_data(self, group_id: str, user_id: str, nickname: str) -> tuple:
+        """验证消息数据参数
+        
+        验证输入的群组ID、用户ID和昵称参数，确保数据格式正确。
+        
+        Args:
+            group_id (str): 群组ID
+            user_id (str): 用户ID
+            nickname (str): 用户昵称
+            
+        Returns:
+            tuple: 验证后的 (group_id, user_id, nickname) 元组
+            
+        Raises:
+            ValueError: 当参数验证失败时抛出
+            TypeError: 当参数类型错误时抛出
+        """
+        # 验证数据
+        group_id = Validators.validate_group_id(group_id)
+        user_id = Validators.validate_user_id(user_id)
+        nickname = Validators.validate_nickname(nickname)
+        
+        return group_id, user_id, nickname
+    
+    async def _process_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None, is_sticker: bool = False):
+        """处理消息统计和记录
+        
+        执行实际的消息统计更新操作，并记录结果日志。
+        智能缓存管理：检查昵称变化，只在必要时更新缓存。
+        支持发言里程碑检测：当用户发言达到里程碑次数时自动推送排行榜。
+        
+        Args:
+            group_id (str): 验证后的群组ID
+            user_id (str): 验证后的用户ID
+            nickname (str): 验证后的用户昵称
+            is_sticker (bool): 是否为表情包/贴图消息
+        """
+        # 直接使用data_manager更新用户消息，同时获取更新后的总发言数
+        success, message_count = await self.data_manager.update_user_message(
+            group_id,
+            user_id,
+            nickname,
+            group_name=group_name,
+            is_sticker=is_sticker,
+        )
+        
+        if success:
+            if self.plugin_config.detailed_logging_enabled:
+                self.logger.info(f"记录消息统计: {nickname}")
+            
+            # 发言里程碑检测（使用update_user_message返回的message_count，无需额外查询）
+            await self._check_milestone(group_id, user_id, nickname, message_count)
+        else:
+            self.logger.error(f"记录消息统计失败: {nickname}")
+    
+    @staticmethod
+    def _calc_beat_percentage(rank: int, active_members: int) -> float:
+        """计算击败的活跃群友百分比。
+
+        排名第 1 视为击败全部其他活跃群友（100%），排名末位视为 0%。
+        仅 1 名活跃群友时返回 100%。
+        """
+        if active_members <= 1:
+            return 100.0
+        beat = (active_members - rank) / (active_members - 1) * 100
+        # 防御性裁剪到 [0, 100]
+        return max(0.0, min(100.0, beat))
+
+    async def _check_milestone(self, group_id: str, user_id: str, nickname: str, current_count: int):
+        """检测用户发言是否达到里程碑，达到则自动推送个人成就卡片
+        
+        性能优化：仅在 milestone_enabled=True 且 current_count 在 milestone_targets 中时才执行后续操作。
+        使用缓存（_milestone_set）防止重复创建 set，使用里程碑缓存防止重复推送。
+        """
+        # 快速短路：里程碑功能未启用或目标列表为空，直接返回
+        if not self.plugin_config.milestone_enabled or not self.plugin_config.milestone_targets:
+            return
+        
+        # 使用缓存的 milestone_set，避免每次创建 O(n) 的 set
+        # 同时在 _load_plugin_config 中同步更新
+        if current_count not in self._milestone_set:
+            return
+        
+        # 检查是否已经推送过该里程碑（使用缓存防止重复推送）
+        if self.member_cache.is_milestone_cached(group_id, user_id, current_count):
+            return  # 已推送过，跳过
+        
+        # 标记已推送（先标记再执行，防止并发重复推送）
+        self.member_cache.mark_milestone_cached(group_id, user_id, current_count)
+        
+        self.logger.info(f"🎉 用户 {nickname} 发言达到 {current_count} 次里程碑，准备推送个人成就卡片")
+        
+        try:
+            # 获取群组的 unified_msg_origin
+            unified_msg_origin = self.group_unified_msg_origins.get(str(group_id))
+            if not unified_msg_origin:
+                self.logger.warning(f"群组 {group_id} 缺少 unified_msg_origin，无法推送里程碑")
+                return
+            
+            # 获取群组数据
+            group_data = await self.data_manager.get_group_data(group_id)
+            if not group_data:
+                return
+            
+            # 计算用户的群内排名、群总发言数与活跃群友数
+            rank = 1
+            group_total_messages = 0
+            active_members = 0
+            target_user_data = None
+
+            for user_data_item in group_data:
+                if not isinstance(user_data_item, UserData):
+                    continue
+                group_total_messages += user_data_item.message_count
+                if user_data_item.message_count > 0:
+                    active_members += 1
+                if user_data_item.message_count > current_count:
+                    rank += 1
+                if user_data_item.user_id == user_id:
+                    target_user_data = user_data_item
+
+            # 计算击败的活跃群友百分比（基于群内排名）
+            percentage = self._calc_beat_percentage(rank, active_members)
+            
+            # 计算今日发言数
+            daily_count = 0
+            if target_user_data:
+                from datetime import date as date_cls
+                today = date_cls.today()
+                daily_count = target_user_data.get_message_count_in_period(today, today)
+            
+            # 计算活跃天数（_message_dates 中的键数量）
+            active_days = 0
+            if target_user_data:
+                target_user_data._ensure_message_dates()
+                active_days = len(target_user_data._message_dates)
+            
+            # 获取最后发言日期
+            last_date = ""
+            if target_user_data and target_user_data.last_date:
+                last_date = target_user_data.last_date
+            
+            # 创建群组信息
+            unified_msg_origin = self.group_unified_msg_origins.get(str(group_id), "")
+            group_info = GroupInfo(group_id=str(group_id), unified_msg_origin=unified_msg_origin)
+            group_name = await self._get_group_name(None, group_id)
+            group_info.group_name = group_name
+
+            if not self.image_generator:
+                self.logger.warning("里程碑推送：图片生成器未初始化")
+                return
+
+            # 计算表情包数量和占比
+            sticker_count = 0
+            if target_user_data:
+                sticker_count = target_user_data.sticker_count
+            sticker_percentage = round(sticker_count / current_count * 100, 1) if current_count > 0 else 0
+            
+            # 生成里程碑个人成就卡片
+            image_path = await self.image_generator.generate_milestone_image(
+                user_id=user_id,
+                nickname=nickname,
+                milestone_count=current_count,
+                rank=rank,
+                daily_count=daily_count,
+                active_days=active_days,
+                last_date=last_date,
+                group_total_messages=group_total_messages,
+                percentage=percentage,
+                group_info=group_info,
+                sticker_count=sticker_count,
+                sticker_percentage=sticker_percentage
+            )
+            
+            if not image_path:
+                self.logger.warning("里程碑推送：个人卡片生成失败")
+                return
+            
+            # 构建消息并推送
+            from astrbot.api.event import MessageChain
+            message_chain = MessageChain()
+            message_chain = message_chain.file_image(image_path)
+            
+            try:
+                await self.context.send_message(unified_msg_origin, message_chain)
+                self.logger.info(f"✅ 里程碑推送成功: {nickname} 发言 {current_count} 次")
+            finally:
+                self._schedule_file_cleanup(image_path)
+
+        except Exception as e:
+            self.logger.error(f"里程碑推送失败: {e}", exc_info=True)
+    
+    def _stop_command_event(self, event: AstrMessageEvent):
+        """阻止命令消息继续进入默认 LLM 回复流程。"""
+        try:
+            event.should_call_llm(False)
+        except Exception:
+            pass
+
+        stop_event = getattr(event, 'stop_event', None)
+        if callable(stop_event):
+            return stop_event()
+        return None
+
+    async def _yield_stop_command_event(self, event: AstrMessageEvent):
+        """生成 stop_event 结果，兼容旧版 AstrBot 没有 stop_event 的情况。"""
+        stop_result = self._stop_command_event(event)
+        if stop_result is not None:
+            yield stop_result
+
     # ========== 排行榜命令 ==========
 
     @filter.command("发言榜里程碑", alias={'发言里程碑'})
@@ -693,6 +990,12 @@ class MessageStatsPlugin(Star):
                 yield event.plain_result("图片生成器未初始化，无法生成个人里程碑卡片！")
                 return
 
+            # 计算表情包数量和占比
+            sticker_count = 0
+            if target_user_data:
+                sticker_count = target_user_data.sticker_count
+            sticker_percentage = round(sticker_count / current_count * 100, 1) if current_count > 0 else 0
+            
             # 生成里程碑个人成就卡片
             image_path = await self.image_generator.generate_milestone_image(
                 user_id=user_id,
@@ -704,7 +1007,9 @@ class MessageStatsPlugin(Star):
                 last_date=last_date,
                 group_total_messages=group_total_messages,
                 percentage=percentage,
-                group_info=group_info
+                group_info=group_info,
+                sticker_count=sticker_count,
+                sticker_percentage=sticker_percentage
             )
             
             if not image_path:
