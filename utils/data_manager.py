@@ -20,6 +20,7 @@ from collections import defaultdict
 from .models import UserData, PluginConfig, MessageDate
 from .data_stores import GroupDataStore, ConfigManager, PluginCache
 from .exception_handlers import safe_data_operation, safe_file_operation, safe_cache_operation, safe_config_operation, safe_calculation
+from .group_id_utils import is_valid_group_id, is_valid_user_id, normalize_group_id, normalize_user_id
 
 # 从集中管理的常量模块导入缓存配置
 from .constants import (
@@ -197,14 +198,7 @@ class DataManager:
         Returns:
             bool: 是否为有效的数字格式
         """
-        if not group_id:
-            return False
-        group_id_str = str(group_id).strip()
-        # 处理前导负号（Telegram 群组ID为负数）
-        if group_id_str.startswith('-'):
-            numeric_part = group_id_str[1:]
-            return numeric_part.isdigit() and len(numeric_part) >= 1
-        return group_id_str.isdigit() and len(group_id_str) >= 1
+        return is_valid_group_id(group_id)
 
     def _validate_json_content(self, content: str) -> bool:
         """验证JSON内容格式
@@ -317,6 +311,7 @@ class DataManager:
         Raises:
             ValueError: 当group_id格式不正确时
         """
+        group_id = normalize_group_id(group_id)
         if not self._is_valid_group_id(group_id):
             raise ValueError(f"群组ID必须是数字字符串，当前值: {group_id}")
         
@@ -357,6 +352,7 @@ class DataManager:
         Raises:
             ValueError: 当group_id格式不正确时
         """
+        group_id = normalize_group_id(group_id)
         if not self._is_valid_group_id(group_id):
             raise ValueError(f"群组ID必须是数字字符串，当前值: {group_id}")
         
@@ -393,16 +389,12 @@ class DataManager:
         Raises:
             ValueError: 当参数格式不正确时
         """
+        group_id = normalize_group_id(group_id)
         if not self._is_valid_group_id(group_id):
             raise ValueError(f"群组ID必须是数字字符串，当前值: {group_id}")
         
-        # 验证用户ID（支持负数，如Telegram用户ID）
-        user_id_str = str(user_id).strip()
-        if user_id_str.startswith('-'):
-            numeric_part = user_id_str[1:]
-            if not numeric_part.isdigit():
-                raise ValueError(f"用户ID必须是数字字符串，当前值: {user_id}")
-        elif not user_id_str.isdigit():
+        user_id = normalize_user_id(user_id)
+        if not is_valid_user_id(user_id):
             raise ValueError(f"用户ID必须是数字字符串，当前值: {user_id}")
         
         # 获取群组级别的锁，确保同一群组的数据操作串行化
@@ -421,6 +413,8 @@ class DataManager:
                 # 更新现有用户 - 使用add_message方法正确记录历史，同时更新昵称
                 user = users_dict[user_id]
                 user.nickname = nickname  # 重要：更新昵称以反映最新变化
+                if avatar_url:
+                    user.avatar_url = avatar_url
                 today = datetime.now().date()
                 message_date = MessageDate.from_date(today)
                 user.add_message(message_date, is_sticker=is_sticker)
@@ -438,7 +432,8 @@ class DataManager:
                     nickname=nickname,
                     message_count=0,  # 先设为0，add_message会增加到1
                     first_message_time=current_timestamp,
-                    last_message_time=current_timestamp
+                    last_message_time=current_timestamp,
+                    avatar_url=avatar_url
                 )
                 # 添加第一条消息记录（这会将message_count增加到1）
                 new_user.add_message(message_date, is_sticker=is_sticker)
@@ -467,7 +462,8 @@ class DataManager:
         Returns:
             bool: 操作是否成功
         """
-        file_path = self.groups_dir / f"{group_id}.json"
+        group_id = normalize_group_id(group_id)
+        file_path = self.group_store._get_group_file_path(group_id)
         
         if await aiofiles.os.path.exists(file_path):
             await aiofiles.os.remove(file_path)
@@ -509,7 +505,19 @@ class DataManager:
             List[str]: 群组ID列表
         """
         group_files = list(self.groups_dir.glob("*.json"))
-        group_ids = [file.stem for file in group_files if file.is_file()]
+        group_ids = []
+        for file in group_files:
+            if not file.is_file():
+                continue
+            group_id = file.stem
+            try:
+                async with aiofiles.open(file, 'r', encoding='utf-8') as f:
+                    data = json.loads(await f.read())
+                if isinstance(data, dict) and data.get('group_id'):
+                    group_id = normalize_group_id(data.get('group_id')) or group_id
+            except (OSError, IOError, UnicodeDecodeError, json.JSONDecodeError):
+                pass
+            group_ids.append(group_id)
         return group_ids
     
     # ========== 配置管理 ==========
@@ -537,21 +545,11 @@ class DataManager:
         if cache_key in self.config_cache:
             return self.config_cache[cache_key]
         
-        if await asyncio.to_thread(self.config_file.exists):
-            async with aiofiles.open(self.config_file, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                config_data = await asyncio.to_thread(json.loads, content)
-            
-            config = PluginConfig.from_dict(config_data)
-            
-            # 缓存配置
-            self.config_cache[cache_key] = config
-            return config
-        else:
-            # 如果配置文件不存在，创建默认配置
-            default_config = PluginConfig()
-            await self.save_config(default_config)
-            return default_config
+        config = await self.config_manager.load_config()
+
+        # 缓存配置
+        self.config_cache[cache_key] = config
+        return config
     
     @safe_config_operation(default_return=None)
     async def save_config(self, config: PluginConfig):

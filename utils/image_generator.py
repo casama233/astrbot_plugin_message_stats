@@ -55,6 +55,7 @@ except ImportError:
 
 from .models import UserData, GroupInfo, PluginConfig
 from .exception_handlers import safe_generation, safe_file_operation
+from .group_id_utils import get_fallback_group_name, is_official_qq_openid, is_placeholder_group_name
 
 
 
@@ -1085,14 +1086,19 @@ class ImageGenerator:
             
             # 准备模板数据
             avatar_url = self._get_avatar_url(user_id, nickname, group_info)
-            group_name = group_info.group_name or f"群{group_info.group_id}"
+            group_name = self._get_display_group_name(group_info)
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             template_data = {
                 'avatar_url': avatar_url,
                 'nickname': self._escape_html_safe(nickname),
                 'user_id': self._escape_html_safe(str(user_id)),
-                'group_name': self._escape_html_safe(f"{group_name}[{group_info.group_id}]"),
+                'group_name': self._escape_html_safe(
+                    f"{group_name}[{group_info.group_id}]"
+                    if not is_official_qq_openid(group_info.group_id)
+                    else group_name
+                ),
+            'show_group_id': not is_official_qq_openid(group_info.group_id),
                 'milestone_count': milestone_count,
                 'rank': rank,
                 'daily_count': daily_count,
@@ -1211,8 +1217,9 @@ class ImageGenerator:
             llm_token_text = f"LLM Token 消耗: {llm_token_usage.get('total_tokens', 0)} (输入{llm_token_usage.get('prompt_tokens', 0)}+输出{llm_token_usage.get('completion_tokens', 0)})"
         
         template_data = {
-            'group_name': self._escape_html_safe(group_info.group_name or f"群{group_info.group_id}"),
+            'group_name': self._escape_html_safe(self._get_display_group_name(group_info)),
             'group_id': self._escape_html_safe(str(group_info.group_id)),
+            'show_group_id': not is_official_qq_openid(group_info.group_id),
             'title': self._escape_html_safe(title),
             'total_messages': self._escape_html_safe(str(total_messages)),
             'user_count': self._escape_html_safe(str(len(users))),
@@ -1285,7 +1292,7 @@ class ImageGenerator:
                 'nickname': user.nickname,
                 'title': user_title,
                 'title_color': user_title_color,
-                'avatar_url': self._get_avatar_url(user.user_id, user.nickname, self._current_group_info),
+                'avatar_url': self._get_avatar_url(user, user.nickname, self._current_group_info),
                 'total': user_messages,
                 'percentage': (user_messages / total_messages * 100) if total_messages > 0 else 0,
                 'fill_ratio': (user_messages / max_messages * 100) if max_messages > 0 else 0,
@@ -1305,7 +1312,7 @@ class ImageGenerator:
                 user_items.append({
                     'rank': current_rank,
                     'nickname': current_user_data.nickname,
-                    'avatar_url': self._get_avatar_url(current_user_data.user_id, current_user_data.nickname, self._current_group_info),
+                    'avatar_url': self._get_avatar_url(current_user_data, current_user_data.nickname, self._current_group_info),
                     'total': current_user_messages,
                     'percentage': (current_user_messages / total_messages * 100) if total_messages > 0 else 0,
                     'last_date': current_user_data.last_date or "未知",
@@ -1408,8 +1415,9 @@ class ImageGenerator:
         
         # 准备模板数据
         template_data = {
-            'group_name': self._escape_html_safe(group_info.group_name or f"群{group_info.group_id}"),
+            'group_name': self._escape_html_safe(self._get_display_group_name(group_info)),
             'group_id': self._escape_html_safe(str(group_info.group_id)),
+            'show_group_id': not is_official_qq_openid(group_info.group_id),
             'title': self._escape_html_safe(title),
             'custom_font_css': self._get_custom_font_css()
         }
@@ -1472,7 +1480,7 @@ class ImageGenerator:
 </head>
 <body>
     <div class="container">
-        <div class="title">{{ group_name }}[{{ group_id }}]</div>
+        <div class="title">{{ group_name }}{% if show_group_id %}[{{ group_id }}]{% endif %}</div>
         <div class="subtitle">{{ title }}</div>
         <div class="empty-text">
             暂无发言数据
@@ -1654,6 +1662,14 @@ class ImageGenerator:
         
         return 'unknown'
 
+    @staticmethod
+    def _get_display_group_name(group_info: GroupInfo) -> str:
+        group_id = str(group_info.group_id) if group_info else ""
+        group_name = getattr(group_info, "group_name", "") if group_info else ""
+        if not is_placeholder_group_name(group_name, group_id):
+            return str(group_name).strip()
+        return get_fallback_group_name(group_id)
+
     async def _prefetch_avatars(self, users: List[UserData], group_info: GroupInfo):
         """预获取本批用户的头像URL，填充到 _avatar_cache
         
@@ -1827,6 +1843,13 @@ class ImageGenerator:
         Returns:
             str: 头像URL
         """
+        if hasattr(user_id, "avatar_url"):
+            avatar_url = self._validate_url_safe(str(getattr(user_id, "avatar_url", "") or ""))
+            if avatar_url:
+                return avatar_url
+            nickname = nickname or getattr(user_id, "nickname", "")
+            user_id = getattr(user_id, "user_id", "")
+
         user_id_str = str(user_id)
         group_id_str = str(group_info.group_id) if group_info else ""
         platform = self._detect_platform(group_id_str)
@@ -2061,7 +2084,7 @@ class ImageGenerator:
     </style>
 </head>
 <body>
-    <div class="title">{{ group_name }}[{{ group_id }}]</div>
+    <div class="title">{{ group_name }}{% if show_group_id %}[{{ group_id }}]{% endif %}</div>
     <div class="title">{{ title }}</div>
     <div class="user-list">
         {{ user_items }}
@@ -2228,7 +2251,7 @@ class ImageGenerator:
     </style>
 </head>
 <body>
-    <div class="title">{{ group_name }}[{{ group_id }}]</div>
+    <div class="title">{{ group_name }}{% if show_group_id %}[{{ group_id }}]{% endif %}</div>
     <div class="title">{{ title }}</div>
     <div class="user-list">
         {{ user_items }}
