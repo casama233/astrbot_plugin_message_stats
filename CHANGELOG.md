@@ -1,5 +1,16 @@
 # 更新日志
 
+## v2.1.7 (2026-07-28)
+
+### ✨ 新功能
+- **里程碑卡片新增表情包统计**：发言里程碑卡片现在显示表情包/贴图/图片的数量及占总发言的百分比，让用户直观了解自己的发言内容构成
+- **消息类型细分统计**：`UserData` 新增 `sticker_count` / `_sticker_dates` 字段，自动检测消息组件类型（Image/Face/Sticker）分类统计，数据持久化到文件
+
+### 🔧 技术改进
+- 新增 `_is_sticker_message()` 方法，遍历消息链组件类型识别贴图/图片消息
+- `add_message()` 新增 `is_sticker` 参数，`data_manager.update_user_message()` 全程透传
+- `generate_milestone_image()` 接收并渲染 `sticker_count` / `sticker_percentage` 到模板
+
 ## v2.1.6 (2026-06-29)
 
 ### 🐛 Bug 修复
