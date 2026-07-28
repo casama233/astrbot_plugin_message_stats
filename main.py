@@ -49,7 +49,7 @@ def _install_feature_methods(*feature_classes):
     return decorator
 
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.1.9")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.2.0")
 @_install_feature_methods(WebPanelMixin, StatsMixin, RankingMixin)
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -597,10 +597,13 @@ class MessageStatsPlugin(Star):
         # 收集群组的unified_msg_origin（重要：用于定时推送）
         await self._collect_group_unified_msg_origin(event)
         
+        # 检测消息是否包含贴图/表情包/图片组件
+        is_sticker = self._is_sticker_message(event)
+        
         # 获取用户昵称并记录统计
         snapshot = extract_group_message_snapshot(event, user_id)
         await self._cache_group_name(event, group_id, snapshot.group_name)
-        await self._record_message_stats(group_id, user_id, snapshot.nickname, snapshot.group_name, snapshot.avatar_url)
+        await self._record_message_stats(group_id, user_id, snapshot.nickname, snapshot.group_name, snapshot.avatar_url, is_sticker=is_sticker)
     
     # ========== 排行榜命令 ==========
 
@@ -693,6 +696,12 @@ class MessageStatsPlugin(Star):
                 yield event.plain_result("图片生成器未初始化，无法生成个人里程碑卡片！")
                 return
 
+            # 计算表情包数量和占比
+            sticker_count = 0
+            if target_user_data:
+                sticker_count = target_user_data.sticker_count
+            sticker_percentage = round(sticker_count / current_count * 100, 1) if current_count > 0 else 0
+
             # 生成里程碑个人成就卡片
             image_path = await self.image_generator.generate_milestone_image(
                 user_id=user_id,
@@ -704,7 +713,9 @@ class MessageStatsPlugin(Star):
                 last_date=last_date,
                 group_total_messages=group_total_messages,
                 percentage=percentage,
-                group_info=group_info
+                group_info=group_info,
+                sticker_count=sticker_count,
+                sticker_percentage=sticker_percentage
             )
             
             if not image_path:

@@ -1,5 +1,6 @@
 """消息记录、群信息缓存、昵称解析和里程碑能力。"""
 
+import re
 from typing import Any, Dict, List, Optional, Set
 
 import orjson
@@ -246,8 +247,37 @@ class StatsMixin:
             return self_id and user_id == str(self_id)
         except (AttributeError, KeyError, TypeError):
             return False
-
-    async def _record_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None, avatar_url: Optional[str] = None):
+    
+    def _is_sticker_message(self, event: AstrMessageEvent) -> bool:
+        """检测消息是否包含 QQ 表情/贴图（Face/Mface）
+        
+        从原始消息字符串（message_obj.message_str）中匹配 CQ 码。
+        注意：普通 Image（图片）[CQ:image 不计入贴图统计。
+        
+        Args:
+            event: 消息事件对象
+            
+        Returns:
+            bool: 是否包含 Face/Mface 组件
+        """
+        try:
+            # 优先使用 message_obj.message_str（原始 CQ 码字符串）
+            message_obj = getattr(event, 'message_obj', None)
+            if message_obj:
+                raw = str(getattr(message_obj, 'message_str', '') or '').strip()
+            else:
+                raw = ""
+            if not raw:
+                return False
+            # 匹配 [CQ:face,...] 和 [CQ:mface,...]（大小写不敏感）
+            has_sticker = bool(re.search(r'\[CQ:(?:face|mface)', raw, re.IGNORECASE))
+            if has_sticker and self.plugin_config.detailed_logging_enabled:
+                self.logger.debug(f"_is_sticker_message: 匹配到 face/mface CQ 码")
+            return has_sticker
+        except Exception:
+            return False
+    
+    async def _record_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None, avatar_url: Optional[str] = None, is_sticker: bool = False):
         """记录消息统计
 
         内部方法,用于记录群成员的消息统计数据.会自动验证输入参数并更新数据.
@@ -286,7 +316,7 @@ class StatsMixin:
             group_id, user_id, nickname = validated_data
 
             # 步骤3: 处理消息统计和记录
-            await self._process_message_stats(group_id, user_id, nickname, group_name, avatar_url)
+            await self._process_message_stats(group_id, user_id, nickname, group_name, avatar_url, is_sticker)
 
         except Exception as e:
             self.logger.error(f"记录消息统计失败({type(e).__name__}): {e}", exc_info=True)
@@ -316,7 +346,7 @@ class StatsMixin:
 
         return group_id, user_id, nickname
 
-    async def _process_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None, avatar_url: Optional[str] = None):
+    async def _process_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None, avatar_url: Optional[str] = None, is_sticker: bool = False):
         """处理消息统计和记录
 
         执行实际的消息统计更新操作，并记录结果日志。
@@ -327,14 +357,18 @@ class StatsMixin:
             group_id (str): 验证后的群组ID
             user_id (str): 验证后的用户ID
             nickname (str): 验证后的用户昵称
+            is_sticker (bool): 是否为表情包/贴图消息
         """
         # 直接使用data_manager更新用户消息，同时获取更新后的总发言数
+        if self.plugin_config.detailed_logging_enabled:
+            self.logger.debug(f"_process_message_stats: user={nickname}, is_sticker={is_sticker}")
         success, message_count = await self.data_manager.update_user_message(
             group_id,
             user_id,
             nickname,
             group_name=group_name,
             avatar_url=avatar_url,
+            is_sticker=is_sticker,
         )
 
         if success:
@@ -443,6 +477,12 @@ class StatsMixin:
                 self.logger.warning("里程碑推送：图片生成器未初始化")
                 return
 
+            # 计算表情包数量和占比
+            sticker_count = 0
+            if target_user_data:
+                sticker_count = target_user_data.sticker_count
+            sticker_percentage = round(sticker_count / current_count * 100, 1) if current_count > 0 else 0
+
             # 生成里程碑个人成就卡片
             image_path = await self.image_generator.generate_milestone_image(
                 user_id=user_id,
@@ -454,7 +494,9 @@ class StatsMixin:
                 last_date=last_date,
                 group_total_messages=group_total_messages,
                 percentage=percentage,
-                group_info=group_info
+                group_info=group_info,
+                sticker_count=sticker_count,
+                sticker_percentage=sticker_percentage
             )
 
             if not image_path:

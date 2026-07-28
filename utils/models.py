@@ -266,6 +266,7 @@ class UserData:
     user_id: str
     nickname: str
     message_count: int = 0
+    sticker_count: int = 0
     history: List[MessageDate] = field(default_factory=list)
     last_date: Optional[str] = None
     first_message_time: Optional[int] = None
@@ -274,6 +275,8 @@ class UserData:
     # 按天聚合的字典 {date_str: count}，替代 history 列表存储
     # 10万条消息最多365个键值对，内存占用从O(n)降到O(365)
     _message_dates: Dict[str, int] = field(default_factory=dict)
+    # 按天聚合的贴图计数 {date_str: count}
+    _sticker_dates: Dict[str, int] = field(default_factory=dict)
     # LLM 生成的头衔文本（持久化到文件，重启后依然保留）
     llm_title: Optional[str] = None
     # LLM 生成的头衔颜色（持久化到文件），如 "#EF4444"
@@ -290,7 +293,7 @@ class UserData:
 
 
     
-    def add_message(self, message_date: MessageDate):
+    def add_message(self, message_date: MessageDate, is_sticker: bool = False):
         """添加消息记录
         
         增加用户的发言计数并记录发言日期。使用按天聚合的字典存储，
@@ -298,6 +301,7 @@ class UserData:
         
         Args:
             message_date (MessageDate): 消息日期对象
+            is_sticker (bool): 是否为表情包/贴图消息，默认 False
             
         Returns:
             None: 无返回值，直接修改对象状态
@@ -310,6 +314,13 @@ class UserData:
         if date_str not in self._message_dates:
             self._message_dates[date_str] = 0
         self._message_dates[date_str] += 1
+        
+        # 如果是贴图消息，更新贴图计数
+        if is_sticker:
+            self.sticker_count += 1
+            if date_str not in self._sticker_dates:
+                self._sticker_dates[date_str] = 0
+            self._sticker_dates[date_str] += 1
         
         # 更新最后发言日期
         self.last_date = date_str
@@ -389,6 +400,11 @@ class UserData:
         }
         if self.avatar_url:
             result["avatar_url"] = self.avatar_url
+        # 持久化贴图计数
+        if self.sticker_count > 0:
+            result["sticker_count"] = self.sticker_count
+        if self._sticker_dates:
+            result["sticker_dates"] = {k: v for k, v in sorted(self._sticker_dates.items())}
         # 持久化头衔字段
         if self.llm_title:
             result["llm_title"] = self.llm_title
@@ -449,6 +465,11 @@ class UserData:
             except TypeError as e:
                 logger.warning(f"history字段类型错误: {type(data.get('history'))}, 错误: {e}")
         
+        # 恢复持久化的贴图计数
+        if "sticker_count" in data:
+            user_data.sticker_count = data["sticker_count"]
+        if "sticker_dates" in data and isinstance(data["sticker_dates"], dict):
+            user_data._sticker_dates = {k: int(v) for k, v in data["sticker_dates"].items()}
         # 恢复持久化的头衔字段
         if "llm_title" in data:
             user_data.llm_title = data["llm_title"]
