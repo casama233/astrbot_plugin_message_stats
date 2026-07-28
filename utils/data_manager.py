@@ -371,7 +371,7 @@ class DataManager:
             self.logger.error(f"群组 {group_id} 数据保存失败")
     
     @safe_data_operation(default_return=(False, 0))
-    async def update_user_message(self, group_id: str, user_id: str, nickname: str, group_name: str = None, avatar_url: str = None) -> tuple:
+    async def update_user_message(self, group_id: str, user_id: str, nickname: str, group_name: str = None, avatar_url: str = None, is_sticker: bool = False) -> tuple:
         """更新用户消息统计
         
         异步更新指定用户在群组中的消息统计，包括新增用户和更新现有用户。
@@ -416,7 +416,7 @@ class DataManager:
                     user.avatar_url = avatar_url
                 today = datetime.now().date()
                 message_date = MessageDate.from_date(today)
-                user.add_message(message_date)
+                user.add_message(message_date, is_sticker=is_sticker)
                 user.last_message_time = current_timestamp
                 if user.first_message_time is None:
                     user.first_message_time = current_timestamp
@@ -435,7 +435,7 @@ class DataManager:
                     avatar_url=avatar_url
                 )
                 # 添加第一条消息记录（这会将message_count增加到1）
-                new_user.add_message(message_date)
+                new_user.add_message(message_date, is_sticker=is_sticker)
                 users_dict[user_id] = new_user
             
             # 将字典转换回列表
