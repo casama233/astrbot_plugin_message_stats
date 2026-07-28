@@ -64,7 +64,7 @@ from .utils.constants import (
 # 导入统一异常处理器，简化命令方法的异常处理
 from .utils.exception_handlers import ExceptionHandler
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.1.6")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.1.7")
 
 class MessageStatsPlugin(Star):
     """群发言统计插件
@@ -1226,10 +1226,13 @@ class MessageStatsPlugin(Star):
         # 收集群组的unified_msg_origin（重要：用于定时推送）
         await self._collect_group_unified_msg_origin(event)
         
+        # 检测消息是否包含贴图/表情包/图片组件
+        is_sticker = self._is_sticker_message(event)
+        
         # 获取用户昵称并记录统计
         snapshot = extract_group_message_snapshot(event, user_id)
         await self._cache_group_name(event, group_id, snapshot.group_name)
-        await self._record_message_stats(group_id, user_id, snapshot.nickname, snapshot.group_name)
+        await self._record_message_stats(group_id, user_id, snapshot.nickname, snapshot.group_name, is_sticker=is_sticker)
     
     def _is_bot_message(self, event: AstrMessageEvent, user_id: str) -> bool:
         """检查是否为机器人消息"""
@@ -1239,7 +1242,39 @@ class MessageStatsPlugin(Star):
         except (AttributeError, KeyError, TypeError):
             return False
     
-    async def _record_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None):
+    def _is_sticker_message(self, event: AstrMessageEvent) -> bool:
+        """检测消息是否包含贴图/表情包/图片组件
+        
+        遍历消息链中的所有组件，检查是否包含图片或贴图类型的组件。
+        支持的组件类型：Image（图片）、Face（QQ表情）、Sticker（贴图）等。
+        
+        Args:
+            event: 消息事件对象
+            
+        Returns:
+            bool: 是否为贴图/表情包消息
+        """
+        try:
+            message_obj = getattr(event, 'message_obj', None)
+            if not message_obj:
+                return False
+            
+            message_chain = getattr(message_obj, 'message', [])
+            if not message_chain:
+                return False
+            
+            # 常见的贴图/图片组件类型名
+            sticker_component_names = {'Image', 'Face', 'Sticker', 'image', 'face', 'sticker'}
+            
+            for comp in message_chain:
+                comp_type = type(comp).__name__
+                if comp_type in sticker_component_names:
+                    return True
+            return False
+        except Exception:
+            return False
+    
+    async def _record_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None, is_sticker: bool = False):
         """记录消息统计
         
         内部方法,用于记录群成员的消息统计数据.会自动验证输入参数并更新数据.
@@ -1278,7 +1313,7 @@ class MessageStatsPlugin(Star):
             group_id, user_id, nickname = validated_data
             
             # 步骤3: 处理消息统计和记录
-            await self._process_message_stats(group_id, user_id, nickname, group_name)
+            await self._process_message_stats(group_id, user_id, nickname, group_name, is_sticker=is_sticker)
             
         except Exception as e:
             self.logger.error(f"记录消息统计失败({type(e).__name__}): {e}", exc_info=True)
@@ -1308,7 +1343,7 @@ class MessageStatsPlugin(Star):
         
         return group_id, user_id, nickname
     
-    async def _process_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None):
+    async def _process_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None, is_sticker: bool = False):
         """处理消息统计和记录
         
         执行实际的消息统计更新操作，并记录结果日志。
@@ -1319,6 +1354,7 @@ class MessageStatsPlugin(Star):
             group_id (str): 验证后的群组ID
             user_id (str): 验证后的用户ID
             nickname (str): 验证后的用户昵称
+            is_sticker (bool): 是否为表情包/贴图消息
         """
         # 直接使用data_manager更新用户消息，同时获取更新后的总发言数
         success, message_count = await self.data_manager.update_user_message(
@@ -1326,6 +1362,7 @@ class MessageStatsPlugin(Star):
             user_id,
             nickname,
             group_name=group_name,
+            is_sticker=is_sticker,
         )
         
         if success:
@@ -1434,6 +1471,12 @@ class MessageStatsPlugin(Star):
                 self.logger.warning("里程碑推送：图片生成器未初始化")
                 return
 
+            # 计算表情包数量和占比
+            sticker_count = 0
+            if target_user_data:
+                sticker_count = target_user_data.sticker_count
+            sticker_percentage = round(sticker_count / current_count * 100, 1) if current_count > 0 else 0
+            
             # 生成里程碑个人成就卡片
             image_path = await self.image_generator.generate_milestone_image(
                 user_id=user_id,
@@ -1445,7 +1488,9 @@ class MessageStatsPlugin(Star):
                 last_date=last_date,
                 group_total_messages=group_total_messages,
                 percentage=percentage,
-                group_info=group_info
+                group_info=group_info,
+                sticker_count=sticker_count,
+                sticker_percentage=sticker_percentage
             )
             
             if not image_path:
@@ -1575,6 +1620,12 @@ class MessageStatsPlugin(Star):
                 yield event.plain_result("图片生成器未初始化，无法生成个人里程碑卡片！")
                 return
 
+            # 计算表情包数量和占比
+            sticker_count = 0
+            if target_user_data:
+                sticker_count = target_user_data.sticker_count
+            sticker_percentage = round(sticker_count / current_count * 100, 1) if current_count > 0 else 0
+            
             # 生成里程碑个人成就卡片
             image_path = await self.image_generator.generate_milestone_image(
                 user_id=user_id,
@@ -1586,7 +1637,9 @@ class MessageStatsPlugin(Star):
                 last_date=last_date,
                 group_total_messages=group_total_messages,
                 percentage=percentage,
-                group_info=group_info
+                group_info=group_info,
+                sticker_count=sticker_count,
+                sticker_percentage=sticker_percentage
             )
             
             if not image_path:
