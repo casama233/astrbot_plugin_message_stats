@@ -1038,9 +1038,7 @@ class ImageGenerator:
                                        last_date: str,
                                        group_total_messages: int,
                                        percentage: float,
-                                       group_info: GroupInfo,
-                                       sticker_count: int = 0,
-                                       sticker_percentage: float = 0.0) -> str:
+                                       group_info: GroupInfo) -> str:
         """生成里程碑个人成就卡片图片
         
         生成一张精美的个人成就卡片，替代里程碑触发时发送整个排行榜。
@@ -1056,8 +1054,6 @@ class ImageGenerator:
             group_total_messages: 群总发言数
             percentage: 击败的活跃群友百分比
             group_info: 群组信息
-            sticker_count: 表情包/贴图数量
-            sticker_percentage: 表情包占总发言的比例
             
         Returns:
             str: 生成的图片路径，失败时返回None
@@ -1106,8 +1102,6 @@ class ImageGenerator:
                 'last_date': self._escape_html_safe(last_date or "未知"),
                 'group_total_messages': group_total_messages,
                 'percentage': f"{percentage:.2f}",
-                'sticker_count': sticker_count,
-                'sticker_percentage': f"{sticker_percentage:.1f}",
                 'current_time': current_time,
                 'custom_font_css': self._get_custom_font_css(),
             }
