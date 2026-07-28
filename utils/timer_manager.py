@@ -38,6 +38,7 @@ from .image_generator import ImageGenerator
 from .llm_analyzer import LLMAnalyzer
 from .date_utils import get_current_date, get_week_start, get_month_start
 from .exception_handlers import safe_timer_operation, safe_generation, safe_data_operation
+from .group_id_utils import get_fallback_group_name, is_placeholder_group_name
 
 
 class TimerTaskStatus(Enum):
@@ -587,7 +588,7 @@ class TimerManager:
         # 1. 优先从内存缓存获取
         if group_id_str in self._group_name_cache:
             cached_name = self._group_name_cache[group_id_str]
-            if cached_name:
+            if cached_name and not is_placeholder_group_name(cached_name, group_id_str):
                 return cached_name
         
         try:
@@ -600,11 +601,12 @@ class TimerManager:
                         group_names = json.loads(content)
                         if isinstance(group_names, dict) and group_names.get(group_id_str):
                             group_name = str(group_names[group_id_str]).strip()
-                            self._group_name_cache[group_id_str] = group_name
-                            return group_name
+                            if not is_placeholder_group_name(group_name, group_id_str):
+                                self._group_name_cache[group_id_str] = group_name
+                                return group_name
 
             # 3. 从数据文件获取群组名称
-            group_file_path = self.data_manager.groups_dir / f"{group_id}.json"
+            group_file_path = self.data_manager.group_store._get_group_file_path(group_id)
             
             if os.path.exists(group_file_path):
                 async with aiofiles.open(group_file_path, 'r', encoding='utf-8') as f:
@@ -616,8 +618,9 @@ class TimerManager:
                         if isinstance(data, dict) and data.get('group_name'):
                             group_name = str(data['group_name']).strip()
                             # 更新到内存缓存
-                            self._group_name_cache[group_id_str] = group_name
-                            return group_name
+                            if not is_placeholder_group_name(group_name, group_id_str):
+                                self._group_name_cache[group_id_str] = group_name
+                                return group_name
                         
                         # 尝试从用户数据中推断群组名称
                         if isinstance(data, list) and len(data) > 0:
@@ -626,21 +629,23 @@ class TimerManager:
                                 for key in ['group_name', 'group_name_cn', '群名', '群组名', 'name', 'title']:
                                     if key in first_user and first_user[key]:
                                         group_name = str(first_user[key]).strip()
-                                        self._group_name_cache[group_id_str] = group_name
-                                        return group_name
+                                        if not is_placeholder_group_name(group_name, group_id_str):
+                                            self._group_name_cache[group_id_str] = group_name
+                                            return group_name
                         elif isinstance(data, dict):
                             for key in ['group_name', 'group_name_cn', '群名', '群组名', 'name', 'title']:
                                 if key in data and data[key]:
                                     group_name = str(data[key]).strip()
-                                    self._group_name_cache[group_id_str] = group_name
-                                    return group_name
+                                    if not is_placeholder_group_name(group_name, group_id_str):
+                                        self._group_name_cache[group_id_str] = group_name
+                                        return group_name
             
             # 4. 返回默认格式
-            return f"群{group_id}"
+            return get_fallback_group_name(group_id)
             
         except (OSError, IOError, ValueError, TypeError, KeyError, json.JSONDecodeError) as e:
             self.logger.debug(f"获取群组 {group_id} 名称时发生错误: {e}")
-            return f"群{group_id}"
+            return get_fallback_group_name(group_id)
     
     @safe_data_operation(default_return=False)
     async def _push_to_group(self, group_id: str, config, rank_type_value: str = None) -> bool:
@@ -774,21 +779,28 @@ class TimerManager:
 
         
         # 根据排行榜类型筛选数据
-        # 定时推送强制使用今日排行榜
         rank_type = self._parse_rank_type(rank_type_value or config.timer_rank_type)
+        rank_title = self._generate_title(rank_type)
         filtered_data = await self._filter_data_by_rank_type(group_data, rank_type)
         if not filtered_data:
-
-            # 今日无数据（如凌晨推送），回退到昨日数据
-            yesterday = datetime.now().date() - timedelta(days=1)
-            filtered_data = [(user, user.get_message_count_in_period(yesterday, yesterday)) for user in group_data if user.get_message_count_in_period(yesterday, yesterday) > 0]
-            if filtered_data:
-                self.logger.info(f"群组 {group_id} 今日无数据，回退到昨日({yesterday})数据")
+            if rank_type == RankType.DAILY:
+                # 今日无数据（如凌晨推送），回退到昨日数据
+                yesterday = datetime.now().date() - timedelta(days=1)
+                for user in group_data:
+                    count = user.get_message_count_in_period(yesterday, yesterday)
+                    if count > 0:
+                        filtered_data.append((user, count))
+                if filtered_data:
+                    rank_title = self._generate_title(RankType.YESTERDAY)
+                    self.logger.info(f"群组 {group_id} 今日无数据，回退到昨日({yesterday})数据")
+                else:
+                    self.logger.warning(f"群组 {group_id} 今日和昨日均无数据")
+                    return False
             else:
-                self.logger.warning(f"群组 {group_id} 今日和昨日均无数据")
+                self.logger.warning(f"群组 {group_id} {rank_title}无数据")
                 return False
         else:
-            self.logger.info(f"群组 {group_id} 定时推送使用今日排行榜")
+            self.logger.info(f"群组 {group_id} 定时推送使用{rank_title}")
         
         # 排序数据
         filtered_data.sort(key=lambda x: x[1], reverse=True)
@@ -812,7 +824,7 @@ class TimerManager:
         group_info.group_name = group_name
         
         # 生成标题
-        title = self._generate_title(rank_type)
+        title = rank_title
         
         # 定时推送只发送图片版本
         image_path = await self._generate_rank_image(users_for_rank, group_info, title, config, token_usage_info)
@@ -1048,6 +1060,10 @@ class TimerManager:
             '今日榜': RankType.DAILY,
             '日榜': RankType.DAILY,
             '今天': RankType.DAILY,
+            'yesterday': RankType.YESTERDAY,
+            '昨日榜': RankType.YESTERDAY,
+            '昨日': RankType.YESTERDAY,
+            '昨天': RankType.YESTERDAY,
             'week': RankType.WEEKLY,
             'weekly': RankType.WEEKLY,
             '本周榜': RankType.WEEKLY,
@@ -1123,6 +1139,9 @@ class TimerManager:
         """
         if rank_type == RankType.DAILY:
             return current_date, current_date
+        elif rank_type == RankType.YESTERDAY:
+            yesterday = current_date - timedelta(days=1)
+            return yesterday, yesterday
         elif rank_type == RankType.WEEKLY:
             # 获取本周开始日期(周一)
             week_start = get_week_start(current_date)
@@ -1161,6 +1180,9 @@ class TimerManager:
             return "总发言排行榜"
         elif rank_type == RankType.DAILY:
             return f"[{now.year}年{now.month}月{now.day}日]发言榜单"
+        elif rank_type == RankType.YESTERDAY:
+            yesterday = now - timedelta(days=1)
+            return f"[{yesterday.year}年{yesterday.month}月{yesterday.day}日]昨日发言榜单"
         elif rank_type == RankType.WEEKLY:
             # 计算周数
             week_num = now.isocalendar().week

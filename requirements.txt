@@ -7,6 +7,9 @@ aiofiles>=24.1.0
 # 图片生成
 playwright>=1.45.0
 
+# T2I 结果裁切
+Pillow>=10.0.0
+
 # JSON处理增强（替代标准 json，性能提升 2-5 倍）
 orjson>=3.10.0
 
