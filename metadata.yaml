@@ -12,4 +12,4 @@ support_platforms:
   - discord
   - lark
   - qq_official
-  - qq_official_webho
+  - qq_official_webhook
