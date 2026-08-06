@@ -483,7 +483,8 @@ class StatsMixin:
                 sticker_count = target_user_data.sticker_count
             sticker_percentage = round(sticker_count / current_count * 100, 1) if current_count > 0 else 0
 
-            # 生成里程碑个人成就卡片
+            # 生成里程碑个人成就卡片（复用记录时存下的头像，兼容 QQ 官方 Bot openid）
+            milestone_avatar_url = target_user_data.avatar_url if target_user_data else ""
             image_path = await self.image_generator.generate_milestone_image(
                 user_id=user_id,
                 nickname=nickname,
@@ -496,7 +497,8 @@ class StatsMixin:
                 percentage=percentage,
                 group_info=group_info,
                 sticker_count=sticker_count,
-                sticker_percentage=sticker_percentage
+                sticker_percentage=sticker_percentage,
+                avatar_url=milestone_avatar_url or ""
             )
 
             if not image_path:

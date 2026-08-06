@@ -1040,7 +1040,8 @@ class ImageGenerator:
                                        percentage: float,
                                        group_info: GroupInfo,
                                        sticker_count: int = 0,
-                                       sticker_percentage: float = 0.0) -> str:
+                                       sticker_percentage: float = 0.0,
+                                       avatar_url: str = "") -> str:
         """生成里程碑个人成就卡片图片
         
         生成一张精美的个人成就卡片，替代里程碑触发时发送整个排行榜。
@@ -1083,7 +1084,7 @@ class ImageGenerator:
                 return None
             
             # 准备模板数据
-            avatar_url = self._get_avatar_url(user_id, nickname, group_info)
+            avatar_url = self._validate_url_safe(str(avatar_url or "")) or self._get_avatar_url(user_id, nickname, group_info)
             group_name = self._get_display_group_name(group_info)
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             

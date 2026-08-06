@@ -22,6 +22,12 @@ from .utils.data_manager import DataManager
 from .utils.image_generator import ImageGenerator, ImageGenerationError
 from .utils.member_cache_manager import MemberCacheManager
 from .utils.event_snapshot import extract_group_message_snapshot
+from .utils.qq_official_helper import (
+    cache_official_author_nick,
+    is_official_platform,
+    official_avatar_url,
+    resolve_official_nickname,
+)
 from .utils.web_panel_mixin import WebPanelMixin
 from .utils.stats_mixin import StatsMixin
 from .utils.ranking_mixin import CUSTOM_DATE_RANK_MESSAGE_PATTERN, RankingMixin
@@ -602,8 +608,20 @@ class MessageStatsPlugin(Star):
         
         # 获取用户昵称并记录统计
         snapshot = extract_group_message_snapshot(event, user_id)
+        nickname = snapshot.nickname
+        avatar_url = snapshot.avatar_url
+        # QQ 官方 Bot：openid 无法用 qlogo 拼接头像，昵称也只在发言时携带，
+        # 参考 meme 插件通过 appid 拼头像、缓存 d.author.username 昵称。
+        if is_official_platform(event):
+            cache_official_author_nick(event)
+            official_nick = resolve_official_nickname(event, user_id)
+            if official_nick:
+                nickname = official_nick
+            official_avatar = official_avatar_url(event, user_id)
+            if official_avatar:
+                avatar_url = official_avatar
         await self._cache_group_name(event, group_id, snapshot.group_name)
-        await self._record_message_stats(group_id, user_id, snapshot.nickname, snapshot.group_name, snapshot.avatar_url, is_sticker=is_sticker)
+        await self._record_message_stats(group_id, user_id, nickname, snapshot.group_name, avatar_url, is_sticker=is_sticker)
     
     # ========== 排行榜命令 ==========
 
@@ -702,7 +720,8 @@ class MessageStatsPlugin(Star):
                 sticker_count = target_user_data.sticker_count
             sticker_percentage = round(sticker_count / current_count * 100, 1) if current_count > 0 else 0
 
-            # 生成里程碑个人成就卡片
+            # 生成里程碑个人成就卡片（复用记录时存下的头像，兼容 QQ 官方 Bot openid）
+            milestone_avatar_url = target_user_data.avatar_url if target_user_data else ""
             image_path = await self.image_generator.generate_milestone_image(
                 user_id=user_id,
                 nickname=nickname,
@@ -715,7 +734,8 @@ class MessageStatsPlugin(Star):
                 percentage=percentage,
                 group_info=group_info,
                 sticker_count=sticker_count,
-                sticker_percentage=sticker_percentage
+                sticker_percentage=sticker_percentage,
+                avatar_url=milestone_avatar_url or ""
             )
             
             if not image_path:
