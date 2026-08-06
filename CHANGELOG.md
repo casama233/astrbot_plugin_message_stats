@@ -1,5 +1,15 @@
 # 更新日志
 
+## v2.2.1 (2026-08-06)
+
+### ✨ 新功能
+- **QQ 官方 Bot 头像/昵称支持**：参考 meme 插件实现，为 `qq_official` / `qq_official_webhook` 平台补充头像与昵称获取能力，排行榜与里程碑卡片不再全部显示默认彩色文字头像
+
+### 🔧 技术改进
+- 新增 `utils/qq_official_helper.py`：通过 bot `appid` 拼接官方头像 URL（`q.qlogo.cn/qqapp/{appid}/{openid}/0`），并缓存成员发言时携带的 `d.author.username`（含 `mentions` @ 目标）作为 openid→昵称映射
+- 记录发言时，官方平台自动回填真实昵称与头像并持久化到 `UserData.avatar_url`
+- `generate_milestone_image()` 新增 `avatar_url` 参数，里程碑卡片优先使用已存真实头像，官方 Bot 的 openid 也能展示头像
+
 ## v2.2.0 (2026-07-28)
 
 ### ✨ 新功能
