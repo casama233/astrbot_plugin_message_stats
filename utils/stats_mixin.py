@@ -249,34 +249,46 @@ class StatsMixin:
             return False
     
     def _is_sticker_message(self, event: AstrMessageEvent) -> bool:
-        """检测消息是否包含 QQ 表情/贴图（Face/Mface）
-        
-        从原始消息字符串（message_obj.message_str）中匹配 CQ 码。
-        注意：普通 Image（图片）[CQ:image 不计入贴图统计。
-        
+        """检测消息是否包含 QQ 表情/贴图（Face/Mface/Image）
+
+        统计范围：系统表情（Face）、市场动画表情（mface）、表情包图片（Image）。
+        优先遍历 message_obj.message 组件列表；若组件未识别（如 mface 被解析为
+        Unknown），则回退到 raw_message 中匹配 CQ 码。
+
         Args:
             event: 消息事件对象
-            
+
         Returns:
-            bool: 是否包含 Face/Mface 组件
+            bool: 是否包含表情/贴图组件
         """
         try:
-            # 优先使用 message_obj.message_str（原始 CQ 码字符串）
             message_obj = getattr(event, 'message_obj', None)
-            if message_obj:
-                raw = str(getattr(message_obj, 'message_str', '') or '').strip()
-            else:
-                raw = ""
-            if not raw:
+            if not message_obj:
                 return False
-            # 匹配 [CQ:face,...] 和 [CQ:mface,...]（大小写不敏感）
-            has_sticker = bool(re.search(r'\[CQ:(?:face|mface)', raw, re.IGNORECASE))
-            if has_sticker and self.plugin_config.detailed_logging_enabled:
-                self.logger.debug(f"_is_sticker_message: 匹配到 face/mface CQ 码")
-            return has_sticker
+
+            # 1) 遍历消息组件列表（结构化检测，覆盖 Face / Image / Mface）
+            message = getattr(message_obj, 'message', None)
+            if message:
+                for comp in message:
+                    comp_type = str(getattr(comp, 'type', '') or '').lower()
+                    class_name = type(comp).__name__
+                    if comp_type in ('face', 'image', 'mface') or class_name in ('Face', 'Image', 'Mface'):
+                        if self.plugin_config.detailed_logging_enabled:
+                            self.logger.debug(f"_is_sticker_message: 检测到 {class_name}({comp_type}) 组件")
+                        return True
+
+            # 2) 兜底：raw_message 中匹配 CQ 码（覆盖 mface 被解析为 Unknown 的情况）
+            raw_message = getattr(message_obj, 'raw_message', None) or getattr(message_obj, 'message_str', None)
+            if raw_message:
+                raw = str(raw_message).lower()
+                if re.search(r'\[cq:(?:face|mface|image)', raw):
+                    if self.plugin_config.detailed_logging_enabled:
+                        self.logger.debug(f"_is_sticker_message: raw_message 匹配到 face/mface/image CQ 码")
+                    return True
+            return False
         except Exception:
             return False
-    
+
     async def _record_message_stats(self, group_id: str, user_id: str, nickname: str, group_name: Optional[str] = None, avatar_url: Optional[str] = None, is_sticker: bool = False):
         """记录消息统计
 
