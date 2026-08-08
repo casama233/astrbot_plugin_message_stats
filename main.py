@@ -30,6 +30,7 @@ from .utils.qq_official_helper import (
 )
 from .utils.web_panel_mixin import WebPanelMixin
 from .utils.stats_mixin import StatsMixin
+from .utils.help_mixin import HelpMixin
 from .utils.ranking_mixin import CUSTOM_DATE_RANK_MESSAGE_PATTERN, RankingMixin
 from .utils.models import GroupInfo, PluginConfig, RankType, UserData
 from .utils.exception_handlers import ExceptionConfig, exception_handler
@@ -55,8 +56,8 @@ def _install_feature_methods(*feature_classes):
     return decorator
 
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.2.0")
-@_install_feature_methods(WebPanelMixin, StatsMixin, RankingMixin)
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.2.2")
+@_install_feature_methods(WebPanelMixin, StatsMixin, RankingMixin, HelpMixin)
 class MessageStatsPlugin(Star):
     """群发言统计插件
     
@@ -751,9 +752,27 @@ class MessageStatsPlugin(Star):
             yield event.plain_result("获取里程碑失败，请稍后重试！")
 
     
+    @filter.command("发言榜帮助", alias={'发言帮助', '发言榜菜单', '水群榜帮助', '发言统计帮助'})
+    async def show_help_menu(self, event: AstrMessageEvent):
+        """显示帮助菜单，别名：发言帮助/发言榜菜单/水群榜帮助/发言统计帮助"""
+        # 阻止指令执行后框架默认再调用一次 LLM 回复（避免无谓消耗 token）
+        event.should_call_llm(False)
+
+        async for result in self._show_help(event):
+            yield result
+        async for result in self._yield_stop_command_event(event):
+            yield result
+
     @filter.command("发言榜", alias={'水群榜', 'B话榜', '发言排行', '发言统计'})
     async def show_full_rank(self, event: AstrMessageEvent, date_expr: str = ""):
         """显示总排行榜，支持可选的指定日期或日期区间。"""
+        if date_expr.strip() in ('帮助', '菜单', 'help'):
+            # 兼容「发言榜 帮助」这种带空格的写法
+            async for result in self._show_help(event):
+                yield result
+            async for result in self._yield_stop_command_event(event):
+                yield result
+            return
         if date_expr:
             try:
                 custom_period = self._parse_custom_rank_period(date_expr)
