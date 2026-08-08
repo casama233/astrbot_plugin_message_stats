@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; font-src 'self' file: data:; style-src 'self' 'unsafe-inline' https:;">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>{{ custom_font_css | safe }}{% raw %}
+        @import url('https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--message-stats-font-family, "ZCOOL KuaiLe", "Comic Sans MS", "Chalkboard SE", "Marker Felt", "PingFang SC", cursive, sans-serif);
+            background: var(--bg);
+            min-height: 100vh;
+            padding: 32px 24px;
+            color: var(--text);
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(circle at 10% 20%, var(--glow-a) 0%, transparent 50%),
+                radial-gradient(circle at 90% 80%, var(--glow-b) 0%, transparent 50%),
+                radial-gradient(circle at 50% 50%, var(--glow-c) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            max-width: 720px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ====== Header ====== */
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+            background: var(--card-alt);
+            border-radius: 60px 60px 60px 12px;
+            padding: 28px 24px 24px;
+            border: 3px solid var(--line);
+            box-shadow: 8px 8px 0 var(--shadow);
+            position: relative;
+        }
+
+        .header::before {
+            content: '✦';
+            position: absolute;
+            top: -12px;
+            left: 24px;
+            font-size: 28px;
+            color: var(--accent-a);
+            transform: rotate(-15deg);
+        }
+
+        .header::after {
+            content: '✧';
+            position: absolute;
+            top: -14px;
+            right: 28px;
+            font-size: 32px;
+            color: var(--accent-b);
+            transform: rotate(20deg);
+        }
+
+        .title {
+            font-size: 42px;
+            color: var(--title);
+            line-height: 1.2;
+            letter-spacing: 2px;
+            text-shadow: 3px 3px 0 var(--title-shadow);
+            padding: 4px 8px;
+            display: inline-block;
+            transform: rotate(-1deg);
+        }
+
+        .subtitle {
+            font-size: 15px;
+            color: var(--muted);
+            background: var(--chip);
+            display: inline-block;
+            padding: 4px 16px;
+            border-radius: 30px;
+            border: 2px dashed var(--dash);
+            margin-top: 10px;
+        }
+
+        /* ====== Sections ====== */
+        .section {
+            background: var(--card);
+            border-radius: 32px 44px 44px 32px;
+            border: 3px solid var(--line);
+            box-shadow: 6px 6px 0 var(--shadow);
+            padding: 18px 20px 16px;
+            margin-bottom: 18px;
+        }
+
+        .section-title {
+            font-size: 24px;
+            color: var(--title);
+            letter-spacing: 1px;
+            padding-bottom: 10px;
+            margin-bottom: 12px;
+            border-bottom: 3px dashed var(--dash);
+        }
+
+        .cmd-item {
+            padding: 9px 0;
+        }
+
+        .cmd-item + .cmd-item {
+            border-top: 2px dotted var(--dot);
+        }
+
+        .cmd-line {
+            display: flex;
+            align-items: baseline;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .cmd-name {
+            font-size: 19px;
+            color: var(--cmd);
+            background: var(--chip);
+            border: 2px solid var(--line);
+            border-radius: 24px;
+            padding: 2px 14px;
+        }
+
+        .cmd-admin {
+            font-size: 13px;
+            color: var(--admin-text);
+            background: var(--admin-bg);
+            border: 2px solid var(--line);
+            border-radius: 20px;
+            padding: 1px 10px;
+        }
+
+        .cmd-desc {
+            font-size: 16px;
+            color: var(--text);
+        }
+
+        .cmd-alias {
+            font-size: 13px;
+            color: var(--muted);
+            margin-top: 4px;
+            padding-left: 6px;
+        }
+
+        /* ====== Tips ====== */
+        .tips {
+            background: var(--tip-bg);
+            border: 3px dashed var(--line);
+            border-radius: 32px;
+            padding: 16px 20px;
+        }
+
+        .tips-title {
+            font-size: 20px;
+            color: var(--title);
+            margin-bottom: 8px;
+        }
+
+        .tips p {
+            font-size: 14px;
+            color: var(--text);
+            margin: 5px 0;
+            line-height: 1.6;
+        }
+
+        /* ====== Footer ====== */
+        .footer {
+            text-align: center;
+            margin-top: 26px;
+            padding-top: 16px;
+            border-top: 3px dashed var(--dash);
+            color: var(--muted);
+        }
+
+        .footer p {
+            margin: 4px 0;
+            font-size: 12px;
+        }
+    {% endraw %}</style>
+    <style>
+        {% if is_dark %}
+        :root {
+            --bg: #1a1a2e;
+            --text: #e8e0d6;
+            --muted: #a3927f;
+            --title: #ffd7a8;
+            --title-shadow: #4a3a2a;
+            --card: #24243c;
+            --card-alt: #2a2a44;
+            --chip: #33334f;
+            --tip-bg: #22223a;
+            --line: #8d7b6a;
+            --dash: #3d3d5c;
+            --dot: #33334f;
+            --shadow: #0f0f1a;
+            --cmd: #ffcc80;
+            --accent-a: #ffab91;
+            --accent-b: #ffcc80;
+            --admin-bg: #4a3550;
+            --admin-text: #ffab91;
+            --glow-a: rgba(255, 183, 77, 0.08);
+            --glow-b: rgba(129, 199, 132, 0.06);
+            --glow-c: rgba(100, 181, 246, 0.05);
+        }
+        {% else %}
+        :root {
+            --bg: #fef9ef;
+            --text: #4a3728;
+            --muted: #8d6e63;
+            --title: #5d4037;
+            --title-shadow: #ffe0b2;
+            --card: #fffef5;
+            --card-alt: #fff8ee;
+            --chip: #fff3e0;
+            --tip-bg: #fff8ee;
+            --line: #5d4037;
+            --dash: #bcaaa4;
+            --dot: #e0d5c8;
+            --shadow: #5d4037;
+            --cmd: #bf360c;
+            --accent-a: #ff8a65;
+            --accent-b: #ffb74d;
+            --admin-bg: #ffccbc;
+            --admin-text: #bf360c;
+            --glow-a: rgba(255, 183, 77, 0.15);
+            --glow-b: rgba(129, 199, 132, 0.12);
+            --glow-c: rgba(100, 181, 246, 0.08);
+        }
+        {% endif %}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="title">📊 {{ title }}</div>
+            <div><span class="subtitle">{{ subtitle }}</span></div>
+        </div>
+
+        {% for section in sections %}
+        <div class="section">
+            <div class="section-title">{{ section.icon }} {{ section.title }}</div>
+            {% for item in section.commands %}
+            <div class="cmd-item">
+                <div class="cmd-line">
+                    <span class="cmd-name">{{ item.command }}</span>
+                    {% if item.admin %}
+                    <span class="cmd-admin">👑 管理员</span>
+                    {% endif %}
+                    <span class="cmd-desc">{{ item.desc }}</span>
+                </div>
+                {% if item.alias %}
+                <div class="cmd-alias">别名：{{ item.alias }}</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+
+        {% if tips %}
+        <div class="tips">
+            <div class="tips-title">💡 小提示</div>
+            {% for tip in tips %}
+            <p>· {{ tip }}</p>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="footer">
+            <p>🎨 由 AstrBot 发言统计插件 · 手绘风格</p>
+            <p>📦 插件版本 v{{ version }}</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -25,6 +25,11 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 
 ### 基础命令
 
+#### 帮助菜单
+- `#发言榜帮助` - 以图片形式显示全部指令（别名：`#发言帮助`、`#发言榜菜单`、`#水群榜帮助`、`#发言统计帮助`）
+  - 帮助图片按内容缓存在 `data/cache/help_images/`，指令、主题、字体或版本没有变化时直接复用，不会重复渲染
+  - 渲染不可用（未装 Playwright、渲染失败或渲染模式为 `text`）时自动回退为文字帮助
+
 #### 查看排行榜
 - `#发言榜` - 查看总发言排行榜
 - `#今日发言榜` - 查看今日发言排行榜  
@@ -43,6 +48,7 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 - `#查看发言` - 查看自己或指定群成员的发言统计（支持@和QQ号）
 - `#查询发言` - `#查看发言` 的别名
 - `#我的发言` - `#查看发言` 的别名
+- `#发言榜里程碑` - 查看个人里程碑成就卡片（别名：`#发言里程碑`）
 
 #### 缓存管理命令
 - `#刷新发言榜群成员缓存` - 手动刷新群成员缓存
@@ -150,6 +156,7 @@ astrbot_plugin_message_stats/
 │   └── cmd_config.json   # 命令配置
 ├── templates/            # 模板目录
 │   ├── __init__.py
+│   ├── help_template.html # 帮助菜单模板（自动适配深浅色）
 │   ├── rank_template.html # 排行榜默认模板
 │   ├── rank_template_cartoon_light.html # 手绘卡通浅色主题
 │   ├── rank_template_cartoon_dark.html # 手绘卡通深色主题
@@ -161,6 +168,8 @@ astrbot_plugin_message_stats/
     ├── data_stores.py    # 数据存储
     ├── date_utils.py     # 日期工具
     ├── file_utils.py     # 文件工具
+    ├── help_content.py   # 帮助菜单指令清单与文字回退
+    ├── help_mixin.py     # 帮助菜单渲染与图片缓存
     ├── image_generator.py # 图片生成
     ├── models.py         # 数据模型
     ├── platform_helper.py # 跨平台兼容辅助
@@ -177,6 +186,11 @@ astrbot_plugin_message_stats/
 - **飞书（Lark/Feishu）** - 完整功能支持
 
 ## 📝 更新日志
+
+### v2.2.2 (2026-08-08)
+- ✅ 新增 `#发言榜帮助` 图片帮助菜单，自动适配深浅色主题与自定义字体
+- ✅ 帮助图片按内容哈希缓存，内容无变化时直接复用
+- ✅ 图片渲染不可用时自动回退文字帮助
 
 ### v2.1.5 (2026-06-27)
 - ✅ 新增 `render_mode` 渲染方式配置（playwright / t2i / text）

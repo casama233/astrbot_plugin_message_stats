@@ -1173,10 +1173,131 @@ class ImageGenerator:
                 except Exception as e:
                     self.logger.warning(f"清理里程碑临时文件失败: {e}")
     
+    def _resolve_current_theme(self) -> str:
+        """解析当前实际生效的主题（考虑自动切换）"""
+        theme = getattr(self.config, 'theme', 'default')
+        if getattr(self.config, 'auto_theme_switch', False):
+            theme = self._get_auto_theme(theme)
+        return theme
+
+    async def build_help_html(self, sections: List[Dict[str, Any]], meta: Dict[str, Any]) -> Optional[str]:
+        """构建帮助菜单 HTML
+
+        HTML 中不包含时间戳等易变内容，因此内容不变时哈希值稳定，
+        可以直接作为帮助图片的缓存键。
+
+        Args:
+            sections: 指令章节数据
+            meta: 标题、提示、版本号等附加信息
+
+        Returns:
+            str: 渲染好的 HTML，模板缺失时返回 None
+        """
+        template_path = self._templates_dir / 'help_template.html'
+        if not os.path.exists(template_path):
+            self.logger.warning(f"帮助菜单模板文件不存在: {template_path}")
+            return None
+
+        template_data = {
+            'title': meta.get('title', '发言榜帮助'),
+            'subtitle': meta.get('subtitle', ''),
+            'tips': meta.get('tips', []),
+            'version': meta.get('version', ''),
+            'sections': sections,
+            'is_dark': self._resolve_current_theme().endswith('_dark'),
+            'custom_font_css': self._get_custom_font_css(),
+        }
+
+        async with aiofiles.open(template_path, 'r', encoding='utf-8') as f:
+            template_content = await f.read()
+
+        if JINJA2_AVAILABLE and self.jinja_env:
+            return self.jinja_env.from_string(template_content).render(**template_data)
+
+        self.logger.warning("Jinja2 不可用，无法渲染帮助菜单模板")
+        return None
+
+    @safe_generation(default_return=None)
+    async def generate_help_image(self, html_content: str, output_path: str) -> Optional[str]:
+        """把帮助菜单 HTML 渲染成图片并写入指定路径（懒加载浏览器，用完即关）
+
+        Args:
+            html_content: build_help_html 生成的 HTML
+            output_path: 目标图片路径（通常是缓存目录中的文件）
+
+        Returns:
+            str: 图片路径，失败时返回 None
+
+        Raises:
+            ImageGenerationError: 浏览器渲染失败时抛出
+        """
+        if not html_content:
+            return None
+
+        await self._ensure_browser()
+
+        page = None
+        temp_path = None
+        success = False
+        target = Path(output_path)
+
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            page = await self.browser.new_page(device_scale_factor=2)
+            await page.set_viewport_size({"width": self.width, "height": self.viewport_height})
+
+            await page.set_content(html_content, wait_until="load")
+            await self._apply_custom_font(page)
+            await self._wait_for_assets(page)
+
+            body_height = await page.evaluate("document.body.scrollHeight")
+            body_width = await page.evaluate(
+                "document.querySelector('.container') ? document.querySelector('.container').offsetWidth + 100 : document.body.scrollWidth"
+            )
+            await page.set_viewport_size({"width": body_width, "height": body_height})
+
+            # 先写临时文件再原子替换，避免并发请求读到半张图
+            temp_path = target.with_name(f"{target.stem}.{uuid.uuid4().hex}.tmp")
+            await page.screenshot(path=temp_path, full_page=True)
+            os.replace(str(temp_path), str(target))
+            temp_path = None
+
+            success = True
+            return str(target)
+
+        except FileNotFoundError as e:
+            self.logger.error(f"帮助菜单资源未找到: {e}")
+            raise ImageGenerationError(f"文件资源未找到: {e}")
+        except PermissionError as e:
+            self.logger.error(f"权限错误: {e}")
+            raise ImageGenerationError(f"权限不足: {e}")
+        except TimeoutError as e:
+            self.logger.error(f"浏览器操作超时: {e}")
+            raise ImageGenerationError(f"操作超时: {e}")
+        except RuntimeError as e:
+            self.logger.error(f"生成帮助菜单图片失败: {e}")
+            self.logger.error(f"详细错误: {traceback.format_exc()}")
+            raise ImageGenerationError(f"生成图片失败: {e}")
+
+        finally:
+            if page:
+                try:
+                    await page.close()
+                except Exception as e:
+                    self.logger.warning(f"关闭页面时发生错误: {e}")
+
+            await self._close_browser()
+
+            if not success and temp_path and temp_path.exists():
+                try:
+                    os.unlink(str(temp_path))
+                except Exception as e:
+                    self.logger.warning(f"清理帮助菜单临时文件失败: {e}")
+
     @safe_generation(default_return="")
-    async def _generate_html(self, 
-                      users: List[UserData], 
-                      group_info: GroupInfo, 
+    async def _generate_html(self,
+                      users: List[UserData],
+                      group_info: GroupInfo,
                       title: str,
                       current_user_id: Optional[str] = None,
                       llm_token_usage: Dict[str, int] = None,
