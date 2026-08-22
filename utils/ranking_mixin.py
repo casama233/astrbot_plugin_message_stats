@@ -28,6 +28,9 @@ CUSTOM_DATE_RANK_MESSAGE_PATTERN = re.compile(
     rf"^(?:[#＃/／]\s*)?{CUSTOM_RANK_PERIOD_PATTERN}\s*发言榜$"
 )
 
+# PDF 文件名非法字符：Windows/通用文件系统保留字符 + 方括号装饰 + 控制字符
+_PDF_FILENAME_INVALID_CHARS = re.compile(r'[\[\]<>:"/\\|?*\x00-\x1f]')
+
 
 class RankingMixin:
     """排行榜数据准备、输出调度、文字格式化和 T2I 能力。"""
@@ -178,6 +181,10 @@ class RankingMixin:
             render_mode = getattr(config, 'render_mode', 'playwright')
             if render_mode == 'text':
                 async for result in self._render_rank_as_text(event, filtered_data, group_info, title, config):
+                    yield result
+            elif render_mode == 'pdf':
+                # PDF 模式：复用图片版 HTML 渲染成 PDF 文件发送，失败自动降级图片/文字
+                async for result in self._render_rank_as_pdf(event, filtered_data, group_info, title, current_user_id, config, token_usage_info, titles_map):
                     yield result
             else:
                 # playwright 或 t2i 都走图片渲染（playwright 失败自动降级 t2i）
@@ -457,6 +464,90 @@ class RankingMixin:
             yield event.plain_result(text_msg)
         finally:
             pass
+
+    async def _render_rank_as_pdf(self, event: AstrMessageEvent, filtered_data: List[tuple],
+                                  group_info: GroupInfo, title: str, current_user_id: str, config: PluginConfig,
+                                  llm_token_usage: Dict[str, int] = None,
+                                  titles_map: Optional[Dict[str, str]] = None):
+        """渲染排行榜为 PDF 文件模式
+
+        复用图片版 HTML 生成矢量 PDF（外观与图片一致），通过 File 组件作为文件发送。
+        生成或发送失败时都会自动降级到图片模式（其内部含 playwright→t2i→文字 的完整降级链）。
+
+        跨容器部署注意：OneBot(aiocqhttp/napcat) 常与 AstrBot 分处不同容器，File 会被框架
+        转成本地路径 / `file://` URI 交给 napcat，napcat 读不到 → 报 retcode 1200「路径不存在」。
+        框架的标准解法是配置 `callback_api_base`（填 napcat 能访问到的地址），此时 File 会被
+        自动注册成 http 链接下发。这里通过 `await event.send(...)` 主动发送并捕获平台异常，
+        发送失败时自动改发图片（图片走 base64，天然跨容器），并提示用户配置 callback_api_base。
+        """
+        # 提取用户数据并应用人数限制（与图片模式一致）
+        limited_data = filtered_data[:config.rand]
+        users_for_pdf = []
+        for user_data, count in limited_data:
+            # 设置 display_total 属性（时间段内的发言数）
+            user_data.display_total = count
+            users_for_pdf.append(user_data)
+
+        # 图片生成器不可用：直接降级文字
+        if not self.image_generator:
+            text_msg = self._generate_text_message(filtered_data, group_info, title, config)
+            yield event.plain_result(text_msg)
+            return
+
+        pdf_path = None
+        try:
+            pdf_path = await self.image_generator.generate_rank_pdf(
+                users_for_pdf, group_info, title, current_user_id, llm_token_usage, titles_map
+            )
+        except ImageGenerationError as e:
+            self.logger.warning(f"PDF 渲染失败，降级为图片/文字: {e}")
+        except Exception as e:
+            self.logger.warning(f"PDF 渲染异常，降级为图片/文字: {type(e).__name__}: {e}")
+
+        # 生成成功：用 File 组件发送 PDF 文件
+        if pdf_path and os.path.exists(pdf_path):
+            from astrbot.core.message.components import File
+            filename = self._build_pdf_filename(title)
+            try:
+                # 主动 await event.send()（而非 yield），以便捕获平台发送异常并降级；
+                # 分离部署未配置 callback_api_base 时，napcat 读不到本地路径会抛 ActionFailed。
+                await event.send(event.chain_result([File(name=filename, file=str(pdf_path))]))
+                self._schedule_file_cleanup(str(pdf_path))
+                return
+            except Exception as e:
+                self._schedule_file_cleanup(str(pdf_path))
+                self.logger.warning(
+                    f"PDF 文件发送失败，降级为图片: {type(e).__name__}: {e}"
+                )
+                yield event.plain_result(
+                    "⚠️ PDF 发送失败，已改用图片模式。\n"
+                    "若 OneBot(napcat) 与 AstrBot 分离部署（不同容器/主机），"
+                    "请在 AstrBot 配置项 callback_api_base 填写 napcat 可访问到的地址后重试。"
+                )
+                async for result in self._render_rank_as_image(
+                    event, filtered_data, group_info, title, current_user_id, config, llm_token_usage, titles_map
+                ):
+                    yield result
+                return
+
+        # PDF 生成失败：降级到图片模式（内部再降级 t2i/文字）
+        yield event.plain_result("⚠️ PDF 生成失败，已切换为图片/文字模式")
+        async for result in self._render_rank_as_image(
+            event, filtered_data, group_info, title, current_user_id, config, llm_token_usage, titles_map
+        ):
+            yield result
+
+    def _build_pdf_filename(self, title: str) -> str:
+        """把排行榜标题清洗成合法的 PDF 文件名，并追加日期后缀
+
+        例：'总发言排行榜' → '总发言排行榜_20260822.pdf'
+            '[2026年8月1日]发言榜单' → '2026年8月1日发言榜单_20260822.pdf'
+        """
+        safe_title = _PDF_FILENAME_INVALID_CHARS.sub("", str(title or "")).strip().strip("_")
+        if not safe_title:
+            safe_title = "发言排行榜"
+        date_suffix = datetime.now().strftime("%Y%m%d")
+        return f"{safe_title}_{date_suffix}.pdf"
 
     async def _try_playwright_render(self, users_for_image, group_info, title, current_user_id, llm_token_usage, titles_map):
         """尝试 playwright 渲染，成功返回路径，失败返回 None"""
