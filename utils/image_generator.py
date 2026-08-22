@@ -919,7 +919,120 @@ class ImageGenerator:
                     self.logger.debug(f"已清理失败的临时文件: {temp_path}")
                 except Exception as e:
                     self.logger.warning(f"清理临时文件失败: {e}")
-    
+
+    async def generate_rank_pdf(self,
+                                users: List[UserData],
+                                group_info: GroupInfo,
+                                title: str,
+                                current_user_id: Optional[str] = None,
+                                llm_token_usage: Dict[str, int] = None,
+                                titles_map: Optional[Dict[str, str]] = None) -> str:
+        """生成排行榜 PDF（复用图片版 HTML，用 Chromium page.pdf() 渲染矢量 PDF）
+
+        与 generate_rank_image 共用同一份 HTML，外观完全一致，区别仅在于输出为
+        单页长图式 PDF 文件而非 PNG 截图。page.pdf() 仅在无头 Chromium 下可用，
+        本项目 _try_launch_browser 已固定 headless=True，满足要求。
+
+        Args:
+            users: 用户数据列表（已按发言数降序排列）
+            group_info: 群组信息
+            title: 排行榜标题
+            current_user_id: 当前用户ID，用于高亮显示
+            llm_token_usage: LLM token使用统计
+            titles_map: 用户ID到头衔的映射字典 {user_id: title}
+
+        Returns:
+            str: 生成的临时 PDF 路径
+
+        Raises:
+            ImageGenerationError: PDF 生成失败时抛出（供上层降级到图片/文字）
+        """
+        # 每次生成时重新检查主题（支持自动主题切换实时生效）
+        self._update_template_path()
+
+        # 按需启动浏览器
+        await self._ensure_browser()
+
+        temp_path = None
+        page = None
+        success = False
+
+        try:
+            # 创建局部页面变量，防止并发时互相覆盖（开启两倍高清渲染，PDF 会忽略但保持布局测量一致）
+            page = await self.browser.new_page(device_scale_factor=2)
+
+            # 设置视口
+            await page.set_viewport_size({"width": self.width, "height": self.viewport_height})
+
+            # 生成与图片版完全相同的 HTML（显式传入头衔映射）
+            html_content = await self._generate_html(users, group_info, title, current_user_id, llm_token_usage, titles_map)
+
+            # 设置页面内容（使用 load 而非 networkidle，避免外部资源加载超时）
+            await page.set_content(html_content, wait_until="load")
+            await self._apply_custom_font(page)
+            await self._wait_for_assets(page)
+
+            # 强制使用屏幕媒体，避免触发 @media print 改变外观，保证与截图一致
+            await page.emulate_media(media="screen")
+
+            # 动态测量内容宽高，保证 PDF 尺寸与截图版一致（复用 generate_rank_image 的测量逻辑）
+            body_height = await page.evaluate("document.body.scrollHeight")
+            body_width = await page.evaluate("document.querySelector('.container') ? document.querySelector('.container').offsetWidth + 100 : document.body.scrollWidth")
+
+            # 生成临时文件路径
+            temp_filename = f"rank_pdf_{uuid.uuid4().hex}.pdf"
+            temp_path = Path(tempfile.gettempdir()) / temp_filename
+
+            # 单页长 PDF：显式指定画布宽高、保留背景渐变、去除页边距
+            await page.pdf(
+                path=str(temp_path),
+                width=f"{body_width}px",
+                height=f"{body_height}px",
+                print_background=True,
+                margin={"top": "0", "bottom": "0", "left": "0", "right": "0"},
+            )
+
+            success = True
+            return str(temp_path)
+
+        except FileNotFoundError as e:
+            self.logger.error(f"临时文件或资源未找到: {e}")
+            raise ImageGenerationError(f"文件资源未找到: {e}")
+        except PermissionError as e:
+            self.logger.error(f"权限错误: {e}")
+            raise ImageGenerationError(f"权限不足: {e}")
+        except TimeoutError as e:
+            self.logger.error(f"浏览器操作超时: {e}")
+            raise ImageGenerationError(f"操作超时: {e}")
+        except ImageGenerationError:
+            # 直接透传，避免被下面的通用分支重新包装
+            raise
+        except Exception as e:
+            # PDF 渲染可能抛出 Playwright 原生异常（非 RuntimeError 子类），统一包装为
+            # ImageGenerationError，确保上层能可靠降级到图片/文字
+            self.logger.error(f"生成排行榜 PDF 失败: {e}")
+            self.logger.error(f"详细错误: {traceback.format_exc()}")
+            raise ImageGenerationError(f"生成 PDF 失败: {e}")
+
+        finally:
+            # 清理资源
+            if page:
+                try:
+                    await page.close()
+                except Exception as e:
+                    self.logger.warning(f"关闭页面时发生错误: {e}")
+
+            # 生成完毕后关闭浏览器释放内存
+            await self._close_browser()
+
+            # 清理临时文件：如果生成失败，删除已创建的临时文件避免积累
+            if not success and temp_path and temp_path.exists():
+                try:
+                    os.unlink(str(temp_path))
+                    self.logger.debug(f"已清理失败的临时 PDF 文件: {temp_path}")
+                except Exception as e:
+                    self.logger.warning(f"清理临时 PDF 文件失败: {e}")
+
     @safe_generation(default_return=None)
     async def generate_personal_stats_image(self, data: dict, group_info: GroupInfo) -> str:
         """生成个人资料卡片图片

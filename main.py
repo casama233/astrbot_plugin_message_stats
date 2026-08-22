@@ -56,7 +56,7 @@ def _install_feature_methods(*feature_classes):
     return decorator
 
 
-@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.2.2")
+@register("astrbot_plugin_message_stats", "xiaoruange39", "群发言统计插件", "2.2.3")
 @_install_feature_methods(WebPanelMixin, StatsMixin, RankingMixin, HelpMixin)
 class MessageStatsPlugin(Star):
     """群发言统计插件

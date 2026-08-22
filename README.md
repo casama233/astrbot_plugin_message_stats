@@ -104,7 +104,7 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 | `theme_switch_light_time` | string | `06:00` | 浅色主题开始时间，格式 HH:MM |
 | `theme_switch_dark_time` | string | `18:00` | 深色主题开始时间，格式 HH:MM |
 | `rand` | int | `20` | 排行榜显示人数（1-100） |
-| `render_mode` | string | `playwright` | 排行榜图片渲染方式：`playwright`（本地 Chromium）、`t2i`（AstrBot 文转图服务）、`text`（纯文字）。图片模式下两种方式自动互相降级，均失败回退文字模式 |
+| `render_mode` | string | `playwright` | 排行榜渲染方式：`playwright`（本地 Chromium 图片）、`t2i`（AstrBot 文转图服务）、`text`（纯文字）、`pdf`（本地 Chromium 导出 PDF 文件，外观与图片一致）。图片模式下 playwright/t2i 自动互相降级，均失败回退文字；pdf 生成失败自动降级为图片/文字 |
 | `detailed_logging_enabled` | bool | `true` | 是否开启详细日志记录 |
 | `timer_enabled` | bool | `false` | 是否启用定时推送排行榜功能 |
 | `timer_push_time` | string | `09:00` | 定时推送时间（支持 HH:MM 或 cron 格式） |
@@ -127,6 +127,16 @@ git clone https://github.com/xiaoruange39/astrbot_plugin_message_stats.git
 1. 通过AstrBot Web面板配置（推荐）
 2. 通过命令配置
 3. 编辑配置文件：`data/config.json`
+
+### PDF 导出与跨容器部署
+
+把「图片渲染方式」(`render_mode`) 设为 `pdf` 后，排行榜命令会发送与图片外观一致的 PDF 文件。
+
+⚠️ **Docker/分离部署注意**：若 OneBot 实现（napcat / Lagrange 等）与 AstrBot 运行在**不同容器或主机**上，发送 PDF 文件需要在 **AstrBot 主配置**里设置 `callback_api_base`，填写 OneBot 端能访问到的 AstrBot 地址（例如同一 docker 网络下的 `http://astrbot:6185`，或宿主机 `http://<host-ip>:6185`）。原因：文件消息会把本地路径交给 OneBot 端读取，分处不同容器时 OneBot 读不到 AstrBot 的 `/tmp` 路径（报 `retcode 1200 路径不存在`）；配置 `callback_api_base` 后，AstrBot 会自动把文件注册成 http 链接交给 OneBot 下载。
+
+- 未配置 `callback_api_base` 且发送失败时，插件会**自动改发图片**并给出提示，不会中断。
+- **图片模式**（`playwright`/`t2i`）走 base64，天然跨容器，无需该配置。
+- **QQ 官方 Bot**、Telegram、Discord、飞书等平台直接上传文件字节，不受此限制。
 
 ### 自定义字体
 
@@ -186,6 +196,11 @@ astrbot_plugin_message_stats/
 - **飞书（Lark/Feishu）** - 完整功能支持
 
 ## 📝 更新日志
+
+### v2.2.3 (2026-08-22)
+- ✅ 新增 `pdf` 渲染方式：把「图片渲染方式」设为 `pdf`，排行榜命令即导出为 PDF 文件，外观与图片一致
+- ✅ PDF 生成或发送失败自动降级为图片/文字
+- ⚠️ OneBot(napcat) 与 AstrBot 分离部署时，PDF 需配置 `callback_api_base` 才能下发（详见「配置说明」）
 
 ### v2.2.2 (2026-08-08)
 - ✅ 新增 `#发言榜帮助` 图片帮助菜单，自动适配深浅色主题与自定义字体

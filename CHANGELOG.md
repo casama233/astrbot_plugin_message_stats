@@ -1,5 +1,19 @@
 # 更新日志
 
+## v2.2.3 (2026-08-22)
+
+### ✨ 新功能
+- **排行榜导出 PDF**：新增 `pdf` 渲染方式，在插件配置页把「图片渲染方式」设为 `pdf` 后，所有手动排行榜命令（发言榜/今日发言榜/自定义日期榜等）改为发送 PDF 文件；PDF 由排行榜 HTML 直接渲染，外观（主题/字体/头像/头衔/背景渐变）与图片版完全一致，为单页长图式矢量 PDF，显示人数沿用 `rand` 配置
+- **自动降级**：PDF 生成失败、或平台发送 PDF 文件失败时，自动降级到图片模式（内部再走 playwright→t2i→文字 的完整降级链），并给出提示
+
+### 🔧 技术改进
+- `ImageGenerator` 新增 `generate_rank_pdf()`，复用 `_generate_html()` 的同一份 HTML，用无头 Chromium 的 `page.pdf()` 渲染（`emulate_media("screen")` 保证外观一致、`print_background=True` 保留背景渐变、去页边距）
+- `RankingMixin` 新增 `_render_rank_as_pdf()` 渲染分支，用框架 `File` 组件发送 PDF，文件名按标题清洗并追加日期（如 `总发言排行榜_20260822.pdf`），临时文件延迟清理
+- PDF 改为 `await event.send()` 主动发送并捕获平台异常：OneBot(napcat) 与 AstrBot 分离部署（不同容器）时，File 会被转成本地路径交给 napcat 导致 `retcode 1200 路径不存在`，此时自动降级为图片并提示配置 `callback_api_base`
+- 定时推送路径不受影响，仍发送图片
+
+> ⚠️ **OneBot 分离部署提示**：若 napcat/Lagrange 等 OneBot 实现与 AstrBot 运行在不同容器或主机，PDF 文件需要 AstrBot 配置 `callback_api_base`（填 OneBot 端能访问到的 AstrBot 地址）才能下发——框架会把本地文件注册成 http 链接交给 OneBot 下载。未配置时插件会自动改发图片。图片模式因走 base64 不受此限制。
+
 ## v2.2.2 (2026-08-08)
 
 ### ✨ 新功能
