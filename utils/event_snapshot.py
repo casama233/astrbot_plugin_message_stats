@@ -32,6 +32,28 @@ AVATAR_URL_KEYS = (
     "profile_image_url",
 )
 
+EVENT_SOURCE_KEYS = (
+    "raw_event",
+    "message_obj",
+    "message_event",
+    "platform_event",
+    "original_event",
+    "event",
+    "raw_message",
+)
+
+# Conversation containers can expose generic ``name``/``title`` fields. Keep
+# them out of the person/nickname traversal so a channel name cannot be
+# mistaken for the sender's nickname.
+GROUP_CONTAINER_KEYS = (
+    "channel",
+    "chat",
+    "conversation",
+    "room",
+    "thread",
+    "guild",
+)
+
 
 def _clean_text(value: Any) -> Optional[str]:
     if value is None:
@@ -66,31 +88,12 @@ def _iter_nested_sources(source: Any, keys: Iterable[str]) -> Iterable[Any]:
                 yield user
 
 
-def _iter_sources(event: Any) -> Iterable[Any]:
+def _iter_sources(event: Any, nested_keys: Iterable[str] = EVENT_SOURCE_KEYS) -> Iterable[Any]:
     if event is None:
         return
 
     seen = set()
     stack = [event]
-    attr_names = (
-        "raw_event",
-        "message_obj",
-        "message_event",
-        "platform_event",
-        "original_event",
-        "event",
-        "raw_message",
-        # Some adapters keep conversation metadata on the raw platform
-        # message. For example, Discord exposes the channel as
-        # ``raw_message.channel`` rather than copying its name to
-        # ``AstrBotMessage``.
-        "channel",
-        "chat",
-        "conversation",
-        "room",
-        "thread",
-        "guild",
-    )
 
     while stack:
         current = stack.pop(0)
@@ -100,10 +103,17 @@ def _iter_sources(event: Any) -> Iterable[Any]:
         seen.add(marker)
         yield current
 
-        for name in attr_names:
+        for name in nested_keys:
             nested = _read_value(current, name)
             if nested is not None:
                 stack.append(nested)
+
+
+def _iter_group_sources(event: Any) -> Iterable[Any]:
+    # Some adapters keep conversation metadata on the raw platform message.
+    # Discord, for example, exposes the displayable channel name as
+    # ``raw_message.channel.name``.
+    yield from _iter_sources(event, EVENT_SOURCE_KEYS + GROUP_CONTAINER_KEYS)
 
 
 def _read_event_sender_name(event: Any) -> Optional[str]:
@@ -116,7 +126,7 @@ def _read_event_sender_name(event: Any) -> Optional[str]:
 
 
 def extract_group_name_from_event(event: Any) -> Optional[str]:
-    for source in _iter_sources(event):
+    for source in _iter_group_sources(event):
         group_name = _read_first_text(source, GROUP_NAME_KEYS)
         if group_name:
             return group_name
@@ -127,9 +137,12 @@ def extract_group_message_snapshot(event: Any, user_id: str) -> GroupMessageSnap
     framework_sender_name = _read_event_sender_name(event)
     card = None
     base_nickname = None
-    group_name = None
+    group_name = extract_group_name_from_event(event)
     avatar_url = None
 
+    # Person metadata intentionally walks only the message/event wrappers.
+    # Conversation containers such as channel/guild may also have ``name``,
+    # which must never become the sender nickname.
     for source in _iter_sources(event):
         person_sources = [source]
         person_sources.extend(_iter_nested_sources(source, (
@@ -149,10 +162,7 @@ def extract_group_message_snapshot(event: Any, user_id: str) -> GroupMessageSnap
             if avatar_url is None:
                 avatar_url = _read_first_text(person, AVATAR_URL_KEYS)
 
-        if group_name is None:
-            group_name = _read_first_text(source, GROUP_NAME_KEYS)
-
-        if card and base_nickname and group_name and avatar_url:
+        if card and base_nickname and avatar_url:
             break
 
     nickname = framework_sender_name or card or base_nickname or f"用户{user_id}"
