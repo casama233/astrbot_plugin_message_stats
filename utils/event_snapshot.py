@@ -80,6 +80,16 @@ def _iter_sources(event: Any) -> Iterable[Any]:
         "original_event",
         "event",
         "raw_message",
+        # Some adapters keep conversation metadata on the raw platform
+        # message. For example, Discord exposes the channel as
+        # ``raw_message.channel`` rather than copying its name to
+        # ``AstrBotMessage``.
+        "channel",
+        "chat",
+        "conversation",
+        "room",
+        "thread",
+        "guild",
     )
 
     while stack:
