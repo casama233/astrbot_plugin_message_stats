@@ -62,6 +62,21 @@ class EventSnapshotTests(unittest.TestCase):
             "QQ Group",
         )
 
+    def test_channel_name_does_not_leak_into_sender_nickname(self):
+        channel = SimpleNamespace(name="bot-chat")
+        raw_message = SimpleNamespace(
+            channel=channel,
+            author=SimpleNamespace(id="123456"),
+        )
+        event = SimpleNamespace(
+            message_obj=SimpleNamespace(raw_message=raw_message),
+        )
+
+        snapshot = event_snapshot.extract_group_message_snapshot(event, "123456")
+
+        self.assertEqual(snapshot.group_name, "bot-chat")
+        self.assertEqual(snapshot.nickname, "用户123456")
+
 
 if __name__ == "__main__":
     unittest.main()
