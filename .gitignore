@@ -16,3 +16,7 @@ env/
 Thumbs.db
 
 tests/*
+
+# Keep local runtime credentials and generated artifacts out of source control.
+/data/cmd_config.json
+/data/config.json
