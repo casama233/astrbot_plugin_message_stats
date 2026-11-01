@@ -300,3 +300,11 @@ astrbot_plugin_message_stats/
 ---
 
 **如果这个插件对您有帮助，请给个⭐支持一下！**
+
+## 上游來源與授權
+
+The repository is a fork of the upstream project. The upstream MIT copyright notice for xiaoruange39 is retained in LICENSE. Changes in this fork do not remove upstream attribution.
+
+- 上游專案：[xiaoruange39/astrbot_plugin_message_stats](https://github.com/xiaoruange39/astrbot_plugin_message_stats)
+- 上游授權狀態：MIT
+- 本倉庫保留上游來源脈絡；請勿將本倉庫的新增修改誤認為上游作者的作品，也勿將本倉庫授權擴張到第三方素材、資料或依賴。
