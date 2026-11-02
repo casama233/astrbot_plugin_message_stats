@@ -2,6 +2,8 @@
 
 # AstrBot 群发言统计插件
 
+**简体中文** · [繁體中文](README.zh-TW.md) · [English](README.en.md)
+
 > 🤖 **此插件由AI辅助生成**
 
 一个功能强大的AstrBot群消息统计插件，支持自动统计群成员发言次数并生成排行榜。
